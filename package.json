@@ -1,0 +1,68 @@
+{
+  "name": "@we-are-singular/logger",
+  "version": "1.0.0",
+  "description": "A simple pinojs wrapper",
+  "type": "module",
+  "types": ".build/index.d.ts",
+  "files": [
+    ".build/**/*"
+  ],
+  "exports": {
+    ".": {
+      "import": "./.build/index.mjs",
+      "require": "./.build/index.cjs"
+    }
+  },
+  "scripts": {
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "build": "rollup -c",
+    "release": "release-it",
+    "lint": "tsc --noEmit && TIMING=1 eslint --color --ext .cjs,.mjs,.js,.ts,.md,.json,.yml,yaml ./"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/we-are-singular/logger.git"
+  },
+  "author": "singular",
+  "license": "MIT",
+  "homepage": "https://github.com/we-are-singular/logger#readme",
+  "bugs": {
+    "url": "https://github.com/we-are-singular/logger/issues"
+  },
+  "devDependencies": {
+    "@nestjs/common": "^10.3.5",
+    "@rollup/plugin-typescript": "^11.1.6",
+    "@we-are-singular/eslint-config": "^1.2.1",
+    "i": "^0.3.7",
+    "prettier": "^3.2.5",
+    "release-it": "^17.1.1",
+    "rollup": "^4.13.0"
+  },
+  "dependencies": {
+    "pino": "^8.19.0",
+    "pino-pretty": "^11.0.0"
+  },
+  "peerDependencies": {
+    "pino": "^8.19.0",
+    "pino-pretty": "^11.0.0"
+  },
+  "release-it": {
+    "hooks": {
+      "before:init": [
+        "git pull -r",
+        "npm run build"
+      ],
+      "after:bump": "npx auto-changelog -p"
+    },
+    "git": {
+      "requireBranch": "main",
+      "commitMessage": "Release: ${version}"
+    },
+    "github": {
+      "release": true
+    },
+    "npm": {
+      "publish": true
+    }
+  }
+}

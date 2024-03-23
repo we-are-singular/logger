@@ -1,0 +1,57 @@
+# Editor directories and files
+.vagrant
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# testing
+coverage
+
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+
+# local env files
+.env.build
+.secure_files/
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.secret
+secret/
+config.yml
+
+# Testing
+coverage
+
+# Build Outputs
+.turbo
+.build/
+.next/
+out/
+build
+dist
+dist-ssr
+
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Misc
+.DS_Store
+*.pem
