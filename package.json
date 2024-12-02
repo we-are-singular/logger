@@ -10,7 +10,8 @@
   "exports": {
     ".": {
       "import": "./.build/index.mjs",
-      "require": "./.build/index.cjs"
+      "require": "./.build/index.cjs",
+      "types": "./.build/index.d.ts"
     }
   },
   "scripts": {
