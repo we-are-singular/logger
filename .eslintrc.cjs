@@ -4,16 +4,13 @@ module.exports = config(
   //
   presets.typescript,
   presets.prettier,
-  presets.markdown,
   {
     overrides: [
-      overrides.namingConvention(["src/**/*.ts"], []),
-      // overrides.typescript(["src/**/*.ts"], {
-      //   parserOptions: {
-      //     project: "./tsconfig.json",
-      //   },
-      // }),
+      overrides.namingConvention(["src/**/*.ts"], [], {
+        import: ["PascalCase", "camelCase", "UPPER_CASE"],
+      }),
+      overrides.typescript(["src/**/*.ts"], { parserOptions: { project: "./tsconfig.json" } }),
     ],
-    ignorePatterns: [".eslintrc.*", "node_modules"],
+    ignorePatterns: [".eslintrc.*", "node_modules", "*.md"],
   }
 )
