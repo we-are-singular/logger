@@ -28,18 +28,16 @@ logger.withModule("AnotherModule").info("Hello, world!")
 override default logger:
 
 ```typescript
-import { NestJSLoggerClass } from "@we-are-singular/logger"
-// or use the factory method
-import { LoggerClass } from "@we-are-singular/logger"
+import { NestJSLoggerClass, LoggerFactory } from "@we-are-singular/logger"
 
 // Using direct instantiation
 const app = await NestFactory.createApplicationContext(AppModule, {
   logger: new NestJSLoggerClass().withModule("AppModule").forRoot(),
 })
 
-// Using factory method
+// Using LoggerFactory
 const app = await NestFactory.createApplicationContext(AppModule, {
-  logger: LoggerClass.forNestJS("AppModule").forRoot(),
+  logger: LoggerFactory.forNestJS("AppModule").forRoot(),
 })
 ```
 
@@ -136,16 +134,16 @@ The FastifyLoggerClass implements the FastifyBaseLogger interface and can be use
 
 ```typescript
 import fastify from "fastify"
-import { FastifyLoggerClass, LoggerClass } from "@we-are-singular/logger"
+import { FastifyLoggerClass, LoggerFactory } from "@we-are-singular/logger"
 
 // Using direct instantiation
 const app = fastify({
   logger: new FastifyLoggerClass("api"),
 })
 
-// Using factory method
+// Using LoggerFactory
 const app = fastify({
-  logger: LoggerClass.forFastify("api"),
+  logger: LoggerFactory.forFastify("api"),
 })
 ```
 
