@@ -1,4 +1,3 @@
-import type { ChildLoggerOptions } from "pino"
 import { getLogger } from "./pino.instance"
 
 /**
@@ -35,12 +34,8 @@ export class LoggerClass {
     return this
   }
 
-  fork(bindings?: Record<string, unknown>, options?: ChildLoggerOptions) {
-    const forked = new LoggerClass(this.app, this.module, this.context)
-    if (bindings) {
-      forked.pino = this.pino.child(bindings, options)
-    }
-    return forked
+  fork() {
+    return new LoggerClass(this.app, this.module, this.context)
   }
 
   setModule(module: string) {

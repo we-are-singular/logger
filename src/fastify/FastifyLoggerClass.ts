@@ -25,7 +25,8 @@ export class FastifyLoggerClass implements FastifyBaseLogger {
    */
   child(bindings: Bindings, options?: ChildLoggerOptions): FastifyBaseLogger {
     const childLogger = new FastifyLoggerClass()
-    childLogger.logger = this.logger.fork(bindings, options)
+    childLogger.logger = this.logger.fork()
+    childLogger.logger.pino = this.logger.pino.child(bindings, options)
     childLogger.level = this.level
     return childLogger
   }
