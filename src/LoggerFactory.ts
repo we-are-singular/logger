@@ -19,13 +19,14 @@ export class LoggerFactory {
 
   /**
    * Factory method to create a Fastify logger instance
+   * @param app Optional app name
    * @param module Optional module name
    * @returns FastifyLoggerClass instance
    * @example
-   * const fastifyLogger = LoggerFactory.forFastify("api")
+   * const fastifyLogger = LoggerFactory.forFastify("MyApp", "api")
    * const app = fastify({ logger: fastifyLogger })
    */
-  static forFastify(module?: string): FastifyLoggerClass {
-    return new FastifyLoggerClass(module)
+  static forFastify(app?: string, module?: string): FastifyLoggerClass {
+    return new FastifyLoggerClass(app, module)
   }
 }

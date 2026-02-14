@@ -4,18 +4,15 @@ import { LoggerClass } from "../LoggerClass"
 /**
  * Fastify logger class that implements FastifyBaseLogger interface
  * @example
- * const fastifyLogger = new FastifyLoggerClass("api")
+ * const fastifyLogger = new FastifyLoggerClass("MyApp", "api")
  * const app = fastify({ logger: fastifyLogger })
  */
 export class FastifyLoggerClass implements FastifyBaseLogger {
   private logger: LoggerClass
   public level: string
 
-  constructor(module?: string) {
-    this.logger = new LoggerClass()
-    if (module) {
-      this.logger.setModule(module)
-    }
+  constructor(app?: string, module?: string, context?: string) {
+    this.logger = new LoggerClass(app, module, context)
     this.level = process.env.LOG_LEVEL ?? "info"
   }
 

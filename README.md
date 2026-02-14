@@ -136,14 +136,19 @@ The FastifyLoggerClass implements the FastifyBaseLogger interface and can be use
 import fastify from "fastify"
 import { FastifyLoggerClass, LoggerFactory } from "@we-are-singular/logger"
 
-// Using direct instantiation
+// Using direct instantiation with app and module
 const app = fastify({
-  logger: new FastifyLoggerClass("api"),
+  logger: new FastifyLoggerClass("MyApp", "api"),
 })
 
 // Using LoggerFactory
 const app = fastify({
-  logger: LoggerFactory.forFastify("api"),
+  logger: LoggerFactory.forFastify("MyApp", "api"),
+})
+
+// Just module (app will be empty)
+const app = fastify({
+  logger: new FastifyLoggerClass(undefined, "api"),
 })
 ```
 
