@@ -1,3 +1,5 @@
 export { getLogger } from "./pino.instance"
-export { LoggerService } from "./nestjs/LoggerService"
+export { LoggerService, NestJSLoggerClass } from "./nestjs/LoggerService"
+export { FastifyLoggerClass } from "./fastify/FastifyLoggerClass"
 export { LoggerClass } from "./LoggerClass"
+export { LoggerFactory } from "./LoggerFactory"
