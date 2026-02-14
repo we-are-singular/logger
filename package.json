@@ -1,6 +1,6 @@
 {
   "name": "@we-are-singular/logger",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "A simple pinojs wrapper",
   "type": "module",
   "types": ".build/index.d.ts",
