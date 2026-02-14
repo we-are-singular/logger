@@ -23,6 +23,65 @@ logger.withModule("AnotherModule").info("Hello, world!")
 
 ## NestJS
 
+### Using NestJSLoggerClass (recommended)
+
+override default logger:
+
+```typescript
+import { NestJSLoggerClass } from "@we-are-singular/logger"
+// or use the factory method
+import { LoggerClass } from "@we-are-singular/logger"
+
+// Using direct instantiation
+const app = await NestFactory.createApplicationContext(AppModule, {
+  logger: new NestJSLoggerClass().withModule("AppModule").forRoot(),
+})
+
+// Using factory method
+const app = await NestFactory.createApplicationContext(AppModule, {
+  logger: LoggerClass.forNestJS("AppModule").forRoot(),
+})
+```
+
+auto context from module provider:
+
+```typescript
+// use forFeature() In other modules
+@Module({
+  imports: [],
+  controllers: [],
+  providers: [
+    //
+    NestJSLoggerClass.forFeature("Services"),
+  ],
+  exports: [
+    //
+    NestJSLoggerClass,
+  ],
+})
+export class ServicesModule {}
+```
+
+auto context:
+
+```typescript
+// as a base class, adding a logger to all classes with a context of the class name
+@Injectable()
+export abstract class BaseClass {
+  readonly logger: NestJSLoggerClass
+  constructor(
+    //
+    @Inject(NestJSLoggerClass) logger: NestJSLoggerClass
+  ) {
+    this.logger = logger.withContext(this.constructor.name.toString())
+  }
+}
+```
+
+### Using LoggerService (deprecated)
+
+> **Note:** `LoggerService` is deprecated and will be removed in a future version. Please use `NestJSLoggerClass` instead.
+
 override default logger:
 
 ```typescript
@@ -65,6 +124,48 @@ export abstract class BaseClass {
     @Inject(LoggerService) logger: LoggerService
   ) {
     this.logger = logger.withContext(this.constructor.name.toString())
+  }
+}
+```
+
+## Fastify
+
+### Using FastifyLoggerClass
+
+The FastifyLoggerClass implements the FastifyBaseLogger interface and can be used directly with Fastify:
+
+```typescript
+import fastify from "fastify"
+import { FastifyLoggerClass, LoggerClass } from "@we-are-singular/logger"
+
+// Using direct instantiation
+const app = fastify({
+  logger: new FastifyLoggerClass("api"),
+})
+
+// Using factory method
+const app = fastify({
+  logger: LoggerClass.forFastify("api"),
+})
+```
+
+This replaces the need for custom logger creation like:
+
+```typescript
+// Old way (no longer needed)
+function createFastifyLogger(): FastifyBaseLogger {
+  const apiLogger = logger.fork().setModule("api")
+
+  return {
+    level: "info",
+    info: apiLogger.info.bind(apiLogger),
+    error: apiLogger.error.bind(apiLogger),
+    debug: apiLogger.debug.bind(apiLogger),
+    fatal: apiLogger.fatal.bind(apiLogger),
+    warn: apiLogger.warn.bind(apiLogger),
+    trace: apiLogger.trace.bind(apiLogger),
+    silent: apiLogger.silent?.bind(apiLogger) || (() => {}),
+    child: () => createFastifyLogger(),
   }
 }
 ```

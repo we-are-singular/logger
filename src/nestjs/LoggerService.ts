@@ -1,7 +1,7 @@
 import { type LoggerService as NestLoggerService } from "@nestjs/common"
 import { LoggerClass } from "../LoggerClass"
 
-export class LoggerService {
+export class NestJSLoggerClass {
   private logger: LoggerClass
 
   constructor(withLogger?: LoggerClass) {
@@ -9,7 +9,7 @@ export class LoggerService {
     this.logger.pino.level = process.env.LOG_LEVEL ?? "info"
   }
 
-  static forFeature(module: string, useClass: typeof LoggerService = LoggerService) {
+  static forFeature(module: string, useClass: typeof NestJSLoggerClass = NestJSLoggerClass) {
     return {
       provide: useClass,
       useFactory: () => new useClass().withModule(module),
@@ -39,11 +39,11 @@ export class LoggerService {
     }
   }
 
-  withModule(module: string, useClass: typeof LoggerService = LoggerService) {
+  withModule(module: string, useClass: typeof NestJSLoggerClass = NestJSLoggerClass) {
     return new useClass(this.logger.fork().setModule(module))
   }
 
-  withContext(context: string, useClass: typeof LoggerService = LoggerService) {
+  withContext(context: string, useClass: typeof NestJSLoggerClass = NestJSLoggerClass) {
     return new useClass(this.logger.fork().setContext(context))
   }
 
@@ -67,3 +67,9 @@ export class LoggerService {
     this.logger.trace(msg, ...extra)
   }
 }
+
+/**
+ * @deprecated Use NestJSLoggerClass instead. This alias will be removed in a future version.
+ */
+// eslint-disable-next-line @typescript-eslint/naming-convention
+export const LoggerService = NestJSLoggerClass

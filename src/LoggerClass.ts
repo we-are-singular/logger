@@ -1,4 +1,6 @@
 import { getLogger } from "./pino.instance"
+import type { NestJSLoggerClass } from "./nestjs/LoggerService"
+import type { FastifyLoggerClass } from "./fastify/FastifyLoggerClass"
 
 /**
  * Logger class
@@ -70,5 +72,41 @@ export class LoggerClass {
 
   fatal(message: string, data?: unknown) {
     this.pino.fatal(data || null, message)
+  }
+
+  /**
+   * Factory method to create a NestJS logger instance
+   * @param module Optional module name
+   * @returns NestJSLoggerClass instance
+   * @example
+   * const nestLogger = LoggerClass.forNestJS("MyModule")
+   */
+  static forNestJS(module?: string): NestJSLoggerClass {
+    // Dynamic import to avoid circular dependency
+    /* eslint-disable @typescript-eslint/naming-convention, @typescript-eslint/no-var-requires */
+    const { NestJSLoggerClass: NestClass } = require("./nestjs/LoggerService") as {
+      NestJSLoggerClass: typeof import("./nestjs/LoggerService").NestJSLoggerClass
+    }
+    /* eslint-enable @typescript-eslint/naming-convention, @typescript-eslint/no-var-requires */
+    const logger = new NestClass()
+    return module ? logger.withModule(module) : logger
+  }
+
+  /**
+   * Factory method to create a Fastify logger instance
+   * @param module Optional module name
+   * @returns FastifyLoggerClass instance
+   * @example
+   * const fastifyLogger = LoggerClass.forFastify("api")
+   * const app = fastify({ logger: fastifyLogger })
+   */
+  static forFastify(module?: string): FastifyLoggerClass {
+    // Dynamic import to avoid circular dependency
+    /* eslint-disable @typescript-eslint/naming-convention, @typescript-eslint/no-var-requires */
+    const { FastifyLoggerClass: FastifyClass } = require("./fastify/FastifyLoggerClass") as {
+      FastifyLoggerClass: typeof import("./fastify/FastifyLoggerClass").FastifyLoggerClass
+    }
+    /* eslint-enable @typescript-eslint/naming-convention, @typescript-eslint/no-var-requires */
+    return new FastifyClass(module)
   }
 }
