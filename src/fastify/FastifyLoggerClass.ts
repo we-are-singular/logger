@@ -34,9 +34,9 @@ export class FastifyLoggerClass implements FastifyBaseLogger {
   info(obj: object, message?: string, ...args: unknown[]): void
   info(msgOrObj: string | object, ...args: unknown[]): void {
     if (typeof msgOrObj === "string") {
-      this.logger.info(msgOrObj, args[0])
+      this.logger.info(msgOrObj, args.length > 0 ? args[0] : undefined)
     } else {
-      const message = typeof args[0] === "string" ? args[0] : ""
+      const message = typeof args[0] === "string" ? args[0] : JSON.stringify(msgOrObj)
       this.logger.info(message, msgOrObj)
     }
   }
@@ -45,9 +45,9 @@ export class FastifyLoggerClass implements FastifyBaseLogger {
   error(obj: object, message?: string, ...args: unknown[]): void
   error(msgOrObj: string | object, ...args: unknown[]): void {
     if (typeof msgOrObj === "string") {
-      this.logger.error(msgOrObj, args[0])
+      this.logger.error(msgOrObj, args.length > 0 ? args[0] : undefined)
     } else {
-      const message = typeof args[0] === "string" ? args[0] : ""
+      const message = typeof args[0] === "string" ? args[0] : JSON.stringify(msgOrObj)
       this.logger.error(message, msgOrObj)
     }
   }
@@ -56,9 +56,9 @@ export class FastifyLoggerClass implements FastifyBaseLogger {
   debug(obj: object, message?: string, ...args: unknown[]): void
   debug(msgOrObj: string | object, ...args: unknown[]): void {
     if (typeof msgOrObj === "string") {
-      this.logger.debug(msgOrObj, args[0])
+      this.logger.debug(msgOrObj, args.length > 0 ? args[0] : undefined)
     } else {
-      const message = typeof args[0] === "string" ? args[0] : ""
+      const message = typeof args[0] === "string" ? args[0] : JSON.stringify(msgOrObj)
       this.logger.debug(message, msgOrObj)
     }
   }
@@ -67,9 +67,9 @@ export class FastifyLoggerClass implements FastifyBaseLogger {
   fatal(obj: object, message?: string, ...args: unknown[]): void
   fatal(msgOrObj: string | object, ...args: unknown[]): void {
     if (typeof msgOrObj === "string") {
-      this.logger.fatal(msgOrObj, args[0])
+      this.logger.fatal(msgOrObj, args.length > 0 ? args[0] : undefined)
     } else {
-      const message = typeof args[0] === "string" ? args[0] : ""
+      const message = typeof args[0] === "string" ? args[0] : JSON.stringify(msgOrObj)
       this.logger.fatal(message, msgOrObj)
     }
   }
@@ -78,9 +78,9 @@ export class FastifyLoggerClass implements FastifyBaseLogger {
   warn(obj: object, message?: string, ...args: unknown[]): void
   warn(msgOrObj: string | object, ...args: unknown[]): void {
     if (typeof msgOrObj === "string") {
-      this.logger.warn(msgOrObj, args[0])
+      this.logger.warn(msgOrObj, args.length > 0 ? args[0] : undefined)
     } else {
-      const message = typeof args[0] === "string" ? args[0] : ""
+      const message = typeof args[0] === "string" ? args[0] : JSON.stringify(msgOrObj)
       this.logger.warn(message, msgOrObj)
     }
   }
@@ -89,9 +89,9 @@ export class FastifyLoggerClass implements FastifyBaseLogger {
   trace(obj: object, message?: string, ...args: unknown[]): void
   trace(msgOrObj: string | object, ...args: unknown[]): void {
     if (typeof msgOrObj === "string") {
-      this.logger.trace(msgOrObj, args[0])
+      this.logger.trace(msgOrObj, args.length > 0 ? args[0] : undefined)
     } else {
-      const message = typeof args[0] === "string" ? args[0] : ""
+      const message = typeof args[0] === "string" ? args[0] : JSON.stringify(msgOrObj)
       this.logger.trace(message, msgOrObj)
     }
   }
