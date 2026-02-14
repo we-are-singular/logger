@@ -1,4 +1,5 @@
 import type { FastifyBaseLogger } from "fastify"
+import type { Bindings, ChildLoggerOptions } from "pino"
 import { LoggerClass } from "../LoggerClass"
 
 /**
@@ -18,11 +19,13 @@ export class FastifyLoggerClass implements FastifyBaseLogger {
 
   /**
    * Create a child logger instance
+   * @param bindings Bindings to include in child logger
+   * @param options Optional child logger options
    * @returns New FastifyLoggerClass instance
    */
-  child(): FastifyBaseLogger {
+  child(bindings: Bindings, options?: ChildLoggerOptions): FastifyBaseLogger {
     const childLogger = new FastifyLoggerClass()
-    childLogger.logger = this.logger.fork()
+    childLogger.logger = this.logger.fork(bindings, options)
     childLogger.level = this.level
     return childLogger
   }

@@ -1,3 +1,4 @@
+import type { FastifyBaseLogger } from "fastify"
 import { NestJSLoggerClass } from "./nestjs/LoggerService"
 import { FastifyLoggerClass } from "./fastify/FastifyLoggerClass"
 
@@ -21,12 +22,12 @@ export class LoggerFactory {
    * Factory method to create a Fastify logger instance
    * @param app Optional app name
    * @param module Optional module name
-   * @returns FastifyLoggerClass instance
+   * @returns FastifyBaseLogger instance
    * @example
    * const fastifyLogger = LoggerFactory.forFastify("MyApp", "api")
    * const app = fastify({ logger: fastifyLogger })
    */
-  static forFastify(app?: string, module?: string): FastifyLoggerClass {
+  static forFastify(app?: string, module?: string): FastifyBaseLogger {
     return new FastifyLoggerClass(app, module)
   }
 }
