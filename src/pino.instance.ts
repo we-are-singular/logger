@@ -17,7 +17,7 @@ const loggerFactory = (): Logger => {
         colorize: true,
         colorizeObjects: true,
         singleLine: false,
-        ignore: "pid,hostname,app,module,context",
+        ignore: "pid,hostname,app,module,context,reqId",
         customPrettifiers: {
           //pid: (log) => "{log.pid}",
           //app: (name) => name,
