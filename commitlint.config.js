@@ -3,7 +3,7 @@ const NON_SCOPED_TYPES = ["build", "ci", "docs", "tools", "style", "release"]
 
 export default {
   extends: ["@commitlint/config-conventional"],
-  ignores: [message => message.startsWith("Release: ")],
+  ignores: [message => /^release:\s/i.test(message)],
   rules: {
     "type-enum": [
       2,
