@@ -1,5 +1,5 @@
 import type { FactoryProvider, LoggerService as NestLoggerService, ValueProvider } from "@nestjs/common"
-import { isErrorInstance, isPlainObject, safeError } from "../core/config"
+import { isErrorInstance, isPlainObject, normalizeLogData, safeError } from "../core/config"
 import { createLogger, isLoggerClass, type LoggerClass } from "../core/logger.class"
 import type { ActiveLogLevel, ErrorMode, LogData, LogDataInput, LogLevel, LoggerOptions } from "../core/types"
 
@@ -7,10 +7,15 @@ import type { ActiveLogLevel, ErrorMode, LogData, LogDataInput, LogLevel, Logger
  * Optional DI token for registering a single shared root {@link LoggerClass} in NestJS
  * so every {@link NestJSLoggerAdapter.forFeature} module reuses the same underlying Pino stream.
  *
- * Register {@link NestJSLoggerAdapter.forRootProvider} in a `@Global()` module and export
- * `NEST_ROOT_LOGGER` so feature modules can inject it.
+ * Register {@link NestJSLoggerAdapter.forRootProvider} in a `@Global()` module imported by
+ * `AppModule` and export `NEST_ROOT_LOGGER` so feature modules can inject it.
  */
 export const NEST_ROOT_LOGGER = Symbol.for("@we-are-singular/logger/NEST_ROOT_LOGGER")
+
+/**
+ * Constructor signature for {@link NestJSLoggerAdapter} and its subclasses.
+ */
+export type NestAdapterConstructor<T extends NestJSLoggerAdapter = NestJSLoggerAdapter> = new (logger: LoggerClass) => T
 
 const NEST_ADAPTER_BRAND = Symbol.for("@we-are-singular/logger/NestJSLoggerAdapter")
 const STACK_LINE_PATTERN = /\n[ \t]+at\s+/
@@ -23,7 +28,10 @@ function isStackString(value: unknown): value is string {
   return typeof value === "string" && STACK_LINE_PATTERN.test(value)
 }
 
-function formatNestMessage(message: unknown, errorMode: ErrorMode): { text: string; objectPayload?: LogData } {
+function formatNestMessage(
+  message: unknown,
+  errorMode: ErrorMode
+): { text: string | undefined; objectPayload?: LogData } {
   if (isErrorInstance(message)) {
     return { text: errorMode === "safe" ? safeError(message).type : message.message }
   }
@@ -31,7 +39,14 @@ function formatNestMessage(message: unknown, errorMode: ErrorMode): { text: stri
     return { text: message }
   }
   if (isPlainObject(message)) {
-    return { text: "", objectPayload: message }
+    if (typeof message.message === "string") {
+      const { message: extracted, ...rest } = message
+      return {
+        text: extracted,
+        objectPayload: Object.keys(rest).length > 0 ? rest : undefined,
+      }
+    }
+    return { text: undefined, objectPayload: message }
   }
   return { text: String(message) }
 }
@@ -41,54 +56,32 @@ function parseStandardParams(optionalParams: unknown[]): LogData {
     return {}
   }
 
-  if (optionalParams.length === 1) {
-    const [only] = optionalParams
-    if (typeof only === "string" && only.length > 0) {
-      return { context: only }
-    }
-    if (isErrorInstance(only)) {
-      return { err: only }
-    }
-    return only !== undefined ? { extra: only } : {}
-  }
-
   const data: LogData = {}
   const last = optionalParams.at(-1)
+  const first = optionalParams[0]
+  let remaining = optionalParams
 
+  // Prefer NestJS Logger's trailing context convention; fall back to leading context for direct calls.
   if (typeof last === "string" && last.length > 0) {
-    // Standard NestJS Logger convention: `this.context` is appended as the trailing string.
     data.context = last
-    const rest = optionalParams.slice(0, -1).filter(item => item !== undefined)
-    if (rest.length === 1) {
-      const [item] = rest
-      if (isErrorInstance(item)) {
-        data.err = item
-      } else {
-        data.extra = item
-      }
-    } else if (rest.length > 1) {
-      data.extra = rest
-    }
-    return data
-  }
-
-  // Fallback for direct `(msg, context, extra)` callers passing context first.
-  const [first, ...rest] = optionalParams
-  if (typeof first === "string" && first.length > 0) {
+    remaining = optionalParams.slice(0, -1)
+  } else if (typeof first === "string" && first.length > 0) {
     data.context = first
-    const definedRest = rest.filter(item => item !== undefined)
-    if (definedRest.length === 1) {
-      data.extra = definedRest[0]
-    } else if (definedRest.length > 1) {
-      data.extra = definedRest
-    }
-    return data
+    remaining = optionalParams.slice(1)
   }
 
-  const defined = optionalParams.filter(item => item !== undefined)
-  if (defined.length > 0) {
+  const defined = remaining.filter(item => item !== undefined)
+  if (defined.length === 1) {
+    const [only] = defined
+    if (isErrorInstance(only)) {
+      data.err = only
+    } else {
+      data.extra = only
+    }
+  } else if (defined.length > 1) {
     data.extra = defined
   }
+
   return data
 }
 
@@ -99,22 +92,6 @@ function parseErrorParams(message: unknown, optionalParams: unknown[], errorMode
   }
 
   if (optionalParams.length === 0) {
-    return data
-  }
-
-  if (optionalParams.length === 1) {
-    const [only] = optionalParams
-    if (isErrorInstance(only)) {
-      data.err = only
-    } else if (isStackString(only)) {
-      if (errorMode !== "safe") {
-        data.stack = only
-      }
-    } else if (typeof only === "string" && only.length > 0) {
-      data.context = only
-    } else if (only !== undefined) {
-      data.extra = only
-    }
     return data
   }
 
@@ -150,8 +127,6 @@ function parseErrorParams(message: unknown, optionalParams: unknown[], errorMode
   return data
 }
 
-type NestAdapterConstructor<T extends NestJSLoggerAdapter> = new (logger: LoggerClass) => T
-
 /**
  * NestJS adapter wrapping an immutable {@link LoggerClass}.
  */
@@ -178,15 +153,19 @@ export class NestJSLoggerAdapter {
    * Create a NestJS module provider scoped to `module`.
    * Reuses the injected `NEST_ROOT_LOGGER` or explicit `parent` logger when provided.
    */
-  static forFeature(module: string): FactoryProvider<NestJSLoggerAdapter>
-  static forFeature<T extends NestJSLoggerAdapter = NestJSLoggerAdapter>(
+  static forFeature(
+    module: string,
+    useClass?: undefined,
+    parent?: LoggerClass | NestJSLoggerAdapter
+  ): FactoryProvider<NestJSLoggerAdapter>
+  static forFeature<T extends NestJSLoggerAdapter>(
     module: string,
     useClass: NestAdapterConstructor<T>,
     parent?: LoggerClass | NestJSLoggerAdapter
   ): FactoryProvider<T>
   static forFeature(
     module: string,
-    useClass: NestAdapterConstructor<NestJSLoggerAdapter> = NestJSLoggerAdapter,
+    useClass: NestAdapterConstructor = NestJSLoggerAdapter,
     parent?: LoggerClass | NestJSLoggerAdapter
   ): FactoryProvider<NestJSLoggerAdapter> {
     if (parent) {
@@ -215,13 +194,27 @@ export class NestJSLoggerAdapter {
    * Return an object implementing NestJS's internal `LoggerService` interface for `NestFactory.create(..., { logger })`.
    */
   forRoot(): NestLoggerService {
+    const emit = (level: ActiveLogLevel, text: string | undefined, data: LogData) => {
+      if (text === undefined) {
+        if (this.logger.isLevelEnabled(level)) {
+          this.logger.pino[level](normalizeLogData(data, this.logger.errorMode))
+        }
+        return
+      }
+      this.logger[level](text, Object.keys(data).length > 0 ? data : undefined)
+    }
+
     const forwardStandard =
       (level: ActiveLogLevel) =>
       (message: unknown, ...optionalParams: unknown[]) => {
         const formatted = formatNestMessage(message, this.logger.errorMode)
         const parsed = parseStandardParams(optionalParams)
-        const data = formatted.objectPayload ? { ...formatted.objectPayload, ...parsed } : parsed
-        this.logger[level](formatted.text, Object.keys(data).length > 0 ? data : undefined)
+        const data: LogData = {
+          ...(isErrorInstance(message) ? { err: message } : {}),
+          ...formatted.objectPayload,
+          ...parsed,
+        }
+        emit(level, formatted.text, data)
       }
 
     const forwardError =
@@ -229,8 +222,11 @@ export class NestJSLoggerAdapter {
       (message: unknown, ...optionalParams: unknown[]) => {
         const formatted = formatNestMessage(message, this.logger.errorMode)
         const parsed = parseErrorParams(message, optionalParams, this.logger.errorMode)
-        const data = formatted.objectPayload ? { ...formatted.objectPayload, ...parsed } : parsed
-        this.logger[level](formatted.text, Object.keys(data).length > 0 ? data : undefined)
+        const data: LogData = {
+          ...formatted.objectPayload,
+          ...parsed,
+        }
+        emit(level, formatted.text, data)
       }
 
     return {
