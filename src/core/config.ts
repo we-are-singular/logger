@@ -202,22 +202,16 @@ export function isErrorInstance(value: unknown): value is Error {
 }
 
 /**
- * Check whether an unknown value is a non-null, non-array record object
- * (excluding built-in value objects such as `Date`, `RegExp`, `Map`, `Set`, and typed arrays/`Buffer`).
- * Callers must check {@link isErrorInstance} separately before calling this helper.
+ * Check whether an unknown value is a plain object (`Object.prototype` or `null` prototype).
+ * Excludes arrays, `Error` instances, built-in objects (`Date`, `Map`, `Set`, `RegExp`, `Buffer`),
+ * and framework class instances (e.g. Fastify `Request`/`Reply`) whose prototype getters must stay intact.
  */
 export function isPlainObject(value: unknown): value is LogData {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (typeof value !== "object" || value === null) {
     return false
   }
-
-  return !(
-    value instanceof Date ||
-    value instanceof RegExp ||
-    value instanceof Map ||
-    value instanceof Set ||
-    ArrayBuffer.isView(value)
-  )
+  const proto: unknown = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
 }
 
 /**
