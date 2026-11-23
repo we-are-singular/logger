@@ -109,11 +109,13 @@ Framework adapters are exported from dedicated subpaths so applications that do 
 
 ### NestJS (`@we-are-singular/logger/nestjs`)
 
+Register `NestJSLoggerAdapter.forRootProvider(rootLogger)` in a `@Global()` module and export `NEST_ROOT_LOGGER` so every feature module's `forFeature()` shares the same underlying Pino stream instead of creating a new one per module.
+
 ```ts
-import { Inject, Injectable, Module } from "@nestjs/common"
+import { Global, Inject, Injectable, Module } from "@nestjs/common"
 import { NestFactory } from "@nestjs/core"
 import { createLogger } from "@we-are-singular/logger"
-import { NestJSLoggerAdapter, createNestJSLogger } from "@we-are-singular/logger/nestjs"
+import { NEST_ROOT_LOGGER, NestJSLoggerAdapter, createNestJSLogger } from "@we-are-singular/logger/nestjs"
 
 const rootLogger = createLogger({ app: "MyNestApp" })
 
@@ -121,8 +123,15 @@ const app = await NestFactory.create(AppModule, {
   logger: createNestJSLogger(rootLogger.withModule("Bootstrap")).forRoot(),
 })
 
+@Global()
 @Module({
-  providers: [NestJSLoggerAdapter.forRootProvider(rootLogger), NestJSLoggerAdapter.forFeature("Services")],
+  providers: [NestJSLoggerAdapter.forRootProvider(rootLogger)],
+  exports: [NEST_ROOT_LOGGER],
+})
+export class LoggingModule {}
+
+@Module({
+  providers: [NestJSLoggerAdapter.forFeature("Services")],
   exports: [NestJSLoggerAdapter],
 })
 export class ServicesModule {}
@@ -155,17 +164,20 @@ const app = fastify({
 
 ## Migrating from v2 to v3
 
-| v2 API / Behavior                                             | v3 Replacement                                                             |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| Import-time singleton `getLogger()`                           | Create explicitly with `createLogger(options)` and pass or derive children |
-| `logger.setModule("X")` / `logger.setContext("Y")` (mutating) | `logger.withModule("X")` / `logger.withContext("Y")` (immutable)           |
-| `LoggerService` / `NestJSLoggerClass`                         | `NestJSLoggerAdapter` from `@we-are-singular/logger/nestjs`                |
-| `FastifyLoggerClass`                                          | `FastifyLoggerAdapter` from `@we-are-singular/logger/fastify`              |
-| `LoggerFactory.forNestJS(...)`                                | `createNestJSLogger(...)` from `@we-are-singular/logger/nestjs`            |
-| `LoggerFactory.forFastify(...)`                               | `createFastifyLogger(...)` from `@we-are-singular/logger/fastify`          |
-| `fastify({ logger: ... })`                                    | `fastify({ loggerInstance: createFastifyLogger(...) })` (Fastify v5)       |
-| `NestJSLoggerClass.forRoot().error(msg)` logged `"undefined"` | Logs `msg` cleanly and includes `stack` only when defined                  |
-| Placeholder redaction (`user.password`, `options.token`)      | Full `DEFAULT_REDACT_PATHS`; override or pass `redact: false` if needed    |
+| v2 API / Behavior                                             | v3 Replacement                                                                                    |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| No Node engine floor                                          | Requires Node.js `>= 22`                                                                          |
+| Import-time singleton `getLogger()`                           | Create explicitly with `createLogger(options)` and pass or derive children                        |
+| `logger.setModule("X")` / `logger.setContext("Y")` (mutating) | `logger.withModule("X")` / `logger.withContext("Y")` (immutable)                                  |
+| `LoggerService` / `NestJSLoggerClass`                         | `NestJSLoggerAdapter` from `@we-are-singular/logger/nestjs`                                       |
+| `FastifyLoggerClass`                                          | `FastifyLoggerAdapter` from `@we-are-singular/logger/fastify`                                     |
+| `LoggerFactory.forNestJS("Mod")`                              | `createNestJSLogger({ module: "Mod" })` or `createNestJSLogger(rootLogger.withModule("Mod"))`     |
+| `LoggerFactory.forFastify("App", "Mod")`                      | `createFastifyLogger({ app: "App", module: "Mod" })` or `createFastifyLogger(rootLogger)`         |
+| `fastify({ logger: ... })`                                    | `fastify({ loggerInstance: createFastifyLogger(...) })` (Fastify v5)                              |
+| Variadic `nestLogger.log(msg, ...extra)`                      | Structured single payload `nestLogger.log(msg, data?)` (`LogData \| () => LogData`)               |
+| Core dev default `trace`; NestJS/Fastify default `info`       | Unified default level: `"debug"` outside `production`, `"info"` in `production`                   |
+| `NestJSLoggerClass.forRoot().error(msg)` logged `"undefined"` | Logs `msg` cleanly and includes `stack` only when defined                                         |
+| Placeholder redaction (`user.password`, `options.token`)      | Full `DEFAULT_REDACT_PATHS`; spread `[...DEFAULT_REDACT_PATHS, ...]` to extend or `redact: false` |
 
 ## Development
 
@@ -175,9 +187,10 @@ Requires Node.js from [`.nvmrc`](.nvmrc) (supports Node `>= 22`).
 npm ci
 npm run format:check
 npm run lint
-npm run build
 npm run test
 npm run test:coverage
+npm run build
+npm run test:smoke
 npm run check:pkg
 ```
 
