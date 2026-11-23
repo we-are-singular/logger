@@ -42,7 +42,14 @@ const SENSITIVE_KEYS = [
   "ssn",
 ] as const
 
-const SENSITIVE_HYPHENATED_KEYS = ["set-cookie", "Set-Cookie", "x-api-key", "X-Api-Key", "proxy-authorization"] as const
+const SENSITIVE_HYPHENATED_KEYS = [
+  "set-cookie",
+  "Set-Cookie",
+  "x-api-key",
+  "X-Api-Key",
+  "proxy-authorization",
+  "Proxy-Authorization",
+] as const
 
 /**
  * Default fast-redact paths covering common credential keys (camelCase and snake_case, top-level
@@ -60,6 +67,7 @@ export const DEFAULT_REDACT_PATHS: readonly string[] = [
   'req.headers["x-api-key"]',
   'req.headers["X-Api-Key"]',
   'req.headers["proxy-authorization"]',
+  'req.headers["Proxy-Authorization"]',
   'res.headers["set-cookie"]',
   'res.headers["Set-Cookie"]',
 ]
@@ -194,10 +202,22 @@ export function isErrorInstance(value: unknown): value is Error {
 }
 
 /**
- * Check whether an unknown value is a non-null, non-array plain object.
+ * Check whether an unknown value is a non-null, non-array record object
+ * (excluding built-in value objects such as `Date`, `RegExp`, `Map`, `Set`, and typed arrays/`Buffer`).
+ * Callers must check {@link isErrorInstance} separately before calling this helper.
  */
 export function isPlainObject(value: unknown): value is LogData {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false
+  }
+
+  return !(
+    value instanceof Date ||
+    value instanceof RegExp ||
+    value instanceof Map ||
+    value instanceof Set ||
+    ArrayBuffer.isView(value)
+  )
 }
 
 /**
@@ -259,6 +279,62 @@ function extractErrorCode(source: object): string | undefined {
 }
 
 /**
+ * Recursively sanitize nested `Error` instances across plain objects and arrays using copy-on-write
+ * cloning so payloads without errors incur zero extra allocations. Cycle-safe via `WeakSet`.
+ */
+export function sanitizeSafeValue(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (isErrorInstance(value)) {
+    return safeError(value)
+  }
+
+  if (Array.isArray(value)) {
+    if (seen.has(value)) {
+      return "[Circular]"
+    }
+    seen.add(value)
+    let cloned: unknown[] | undefined
+    for (let i = 0; i < value.length; i += 1) {
+      const item = value[i]
+      const next = sanitizeSafeValue(item, seen)
+      if (next !== item) {
+        cloned ??= [...value]
+        cloned[i] = next
+      }
+    }
+    seen.delete(value)
+    return cloned ?? value
+  }
+
+  if (!isPlainObject(value)) {
+    return value
+  }
+
+  if (seen.has(value)) {
+    return "[Circular]"
+  }
+  seen.add(value)
+
+  let sanitized: LogData | undefined
+  for (const [key, item] of Object.entries(value)) {
+    const next = sanitizeSafeValue(item, seen)
+    if (next !== item) {
+      sanitized ??= { ...value }
+      sanitized[key] = next
+    }
+  }
+
+  seen.delete(value)
+  return sanitized ?? value
+}
+
+/**
+ * Sanitize all nested `Error` values inside a record when `errorMode === "safe"`.
+ */
+export function sanitizeSafeRecord(record: LogData): LogData {
+  return sanitizeSafeValue(record) as LogData
+}
+
+/**
  * Normalize runtime log data so non-object inputs and Error values never corrupt Pino's JSON output.
  */
 export function normalizeLogData(data: unknown, errorMode: ErrorMode): LogData {
@@ -267,21 +343,12 @@ export function normalizeLogData(data: unknown, errorMode: ErrorMode): LogData {
   }
 
   if (!isPlainObject(data)) {
-    return { value: data }
+    return { value: errorMode === "safe" ? sanitizeSafeValue(data) : data }
   }
 
   if (errorMode !== "safe") {
     return data
   }
 
-  // Only allocate a shallow clone when a top-level Error property needs safe sanitization.
-  let sanitized: LogData | undefined
-  for (const [key, value] of Object.entries(data)) {
-    if (isErrorInstance(value)) {
-      sanitized ??= { ...data }
-      sanitized[key] = safeError(value)
-    }
-  }
-
-  return sanitized ?? data
+  return sanitizeSafeRecord(data)
 }

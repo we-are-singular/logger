@@ -1,5 +1,5 @@
 import type { ChildLoggerOptions, Logger as PinoLogger } from "pino"
-import { isPlainObject, normalizeLogData, serializeSafeError } from "./config"
+import { isPlainObject, normalizeLogData, sanitizeSafeRecord, serializeSafeError } from "./config"
 import { createRootPino } from "./pino-factory"
 import type { ActiveLogLevel, ErrorMode, LogData, LogDataInput, LogLevel, LoggerOptions } from "./types"
 
@@ -143,11 +143,12 @@ export class LoggerClass {
    * Return a new child logger with additional static bindings and optional Pino child options.
    */
   child(bindings: LogData, childOptions?: ChildLoggerOptions): LoggerClass {
+    const safeBindings = this.errorMode === "safe" ? sanitizeSafeRecord(bindings) : bindings
     const safeOptions = enforceSafeSerializers(this.errorMode, childOptions)
-    const bindingKeys = Object.keys(bindings)
+    const bindingKeys = Object.keys(safeBindings)
     const hasOverlap = bindingKeys.some(key => Object.hasOwn(this.bindings, key))
     const hasCustomOptions = this.hasCustomChildOptions || hasNonLevelChildOptions(safeOptions)
-    const nextBindings: LogData = bindingKeys.length > 0 ? { ...this.bindings, ...bindings } : this.bindings
+    const nextBindings: LogData = bindingKeys.length > 0 ? { ...this.bindings, ...safeBindings } : this.bindings
 
     // Fast path chains directly from this.pino to reuse pre-serialized chindings.
     // When overriding an existing key (and no ancestor set non-level custom childOptions),
@@ -158,7 +159,7 @@ export class LoggerClass {
             ...safeOptions,
             level: safeOptions?.level ?? this.pino.level,
           })
-        : this.pino.child(bindings, safeOptions)
+        : this.pino.child(safeBindings, safeOptions)
 
     return LoggerClass.createDerived({
       rootPino: this.rootPino,

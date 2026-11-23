@@ -5,11 +5,11 @@ import pino, {
   type Logger as PinoLogger,
   type LoggerOptions as PinoLoggerOptions,
 } from "pino"
-import { resolveLoggerConfig, serializeSafeError } from "./config"
+import { resolveLoggerConfig, sanitizeSafeRecord, serializeSafeError } from "./config"
 import { createPrettyStream } from "./pretty"
 import type { ErrorMode, LogData, LoggerOptions } from "./types"
 
-function buildInitialBindings(options: LoggerOptions): LogData | undefined {
+function buildInitialBindings(options: LoggerOptions, errorMode: ErrorMode): LogData | undefined {
   const bindings: LogData = {
     ...options.bindings,
     ...(options.app ? { app: options.app } : {}),
@@ -17,7 +17,11 @@ function buildInitialBindings(options: LoggerOptions): LogData | undefined {
     ...(options.context ? { context: options.context } : {}),
   }
 
-  return Object.keys(bindings).length > 0 ? bindings : undefined
+  if (Object.keys(bindings).length === 0) {
+    return undefined
+  }
+
+  return errorMode === "safe" ? sanitizeSafeRecord(bindings) : bindings
 }
 
 export interface CreatedPinoRoot {
@@ -33,6 +37,9 @@ export interface CreatedPinoRoot {
 export function createRootPino(options: LoggerOptions): CreatedPinoRoot {
   const config = resolveLoggerConfig(options)
 
+  const mixin = options.mixin
+  const safeMixin = mixin && config.errorMode === "safe" ? (): LogData => sanitizeSafeRecord(mixin()) : mixin
+
   const pinoOptions: PinoLoggerOptions = {
     level: config.level,
     timestamp: stdTimeFunctions.isoTime,
@@ -45,7 +52,7 @@ export function createRootPino(options: LoggerOptions): CreatedPinoRoot {
         ? { err: serializeSafeError, error: serializeSafeError }
         : { err: stdSerializers.err, error: stdSerializers.err },
     ...(config.redact ? { redact: config.redact } : {}),
-    ...(options.mixin ? { mixin: options.mixin } : {}),
+    ...(safeMixin ? { mixin: safeMixin } : {}),
   }
 
   let destination: DestinationStream | undefined
@@ -66,7 +73,7 @@ export function createRootPino(options: LoggerOptions): CreatedPinoRoot {
   }
 
   const rootPino = destination ? pino(pinoOptions, destination) : pino(pinoOptions)
-  const initialBindings = buildInitialBindings(options)
+  const initialBindings = buildInitialBindings(options, config.errorMode)
   const instance = initialBindings ? rootPino.child(initialBindings) : rootPino
 
   return {
