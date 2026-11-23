@@ -11,12 +11,18 @@ export function createLogContext<T extends LogData = LogData>(): LogContext<T> {
   return {
     run<R>(fields: T, fn: () => R): R {
       const parent = storage.getStore()
-      const merged = parent ? ({ ...parent, ...fields } as T) : fields
+      // Shallow-clone fields so external mutations or frozen inputs never corrupt the store.
+      const merged = parent ? ({ ...parent, ...fields } as T) : ({ ...fields } as T)
       return storage.run(merged, fn)
     },
     get(): T | undefined {
       return storage.getStore()
     },
-    mixin: (): LogData => storage.getStore() ?? {},
+    mixin: (): LogData => {
+      const store = storage.getStore()
+      // Pino merges log payloads into the mixin return value in place via Object.assign,
+      // so always return a fresh shallow copy to keep the ALS store immutable across logs.
+      return store ? { ...store } : {}
+    },
   }
 }

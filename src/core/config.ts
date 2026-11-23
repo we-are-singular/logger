@@ -1,3 +1,4 @@
+import { types } from "node:util"
 import type { ErrorMode, LogData, LogFormat, LogLevel, LoggerOptions, RedactOption, SafeError } from "./types"
 
 const VALID_LEVELS: ReadonlySet<string> = new Set<LogLevel>([
@@ -18,34 +19,49 @@ const SENSITIVE_KEYS = [
   "passphrase",
   "token",
   "accessToken",
+  "access_token",
   "refreshToken",
+  "refresh_token",
   "idToken",
+  "id_token",
   "secret",
   "clientSecret",
+  "client_secret",
   "webhookSecret",
+  "webhook_secret",
   "apiKey",
+  "api_key",
   "privateKey",
+  "private_key",
   "authorization",
+  "Authorization",
   "cookie",
+  "Cookie",
   "creditCard",
+  "credit_card",
   "ssn",
 ] as const
 
+const SENSITIVE_HYPHENATED_KEYS = ["set-cookie", "Set-Cookie", "x-api-key", "X-Api-Key", "proxy-authorization"] as const
+
 /**
- * Default fast-redact paths covering common credential keys (top-level and one level deep)
- * as well as sensitive HTTP headers.
+ * Default fast-redact paths covering common credential keys (camelCase and snake_case, top-level
+ * and one level deep) as well as sensitive lowercase and Title-Case HTTP headers.
  */
 export const DEFAULT_REDACT_PATHS: readonly string[] = [
   ...SENSITIVE_KEYS,
   ...SENSITIVE_KEYS.map(key => `*.${key}`),
-  '["set-cookie"]',
-  '*["set-cookie"]',
-  "headers.authorization",
-  "headers.cookie",
-  'headers["set-cookie"]',
+  ...SENSITIVE_HYPHENATED_KEYS.map(key => `["${key}"]`),
+  ...SENSITIVE_HYPHENATED_KEYS.map(key => `*["${key}"]`),
   "req.headers.authorization",
+  "req.headers.Authorization",
   "req.headers.cookie",
+  "req.headers.Cookie",
+  'req.headers["x-api-key"]',
+  'req.headers["X-Api-Key"]',
+  'req.headers["proxy-authorization"]',
   'res.headers["set-cookie"]',
+  'res.headers["Set-Cookie"]',
 ]
 
 /**
@@ -171,12 +187,27 @@ export function resolveLoggerConfig(options: LoggerOptions = {}): ResolvedLogger
 }
 
 /**
+ * Check whether an unknown value is an Error instance (including cross-realm native errors).
+ */
+export function isErrorInstance(value: unknown): value is Error {
+  return value instanceof Error || types.isNativeError(value)
+}
+
+/**
+ * Check whether an unknown value is a non-null, non-array plain object.
+ */
+export function isPlainObject(value: unknown): value is LogData {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/**
  * Extract only non-sensitive error metadata (`type` and optional `code`) without exposing
  * `Error.message` or stack traces that may contain credentials, SQL, or URLs.
  */
 export function safeError(error: unknown): SafeError {
-  if (error instanceof Error) {
-    const type = error.name || error.constructor.name || "Error"
+  if (isErrorInstance(error)) {
+    const ctorName = typeof error.constructor?.name === "string" ? error.constructor.name : ""
+    const type = error.name || ctorName || "Error"
     const code = extractErrorCode(error)
     return code !== undefined ? { type, code } : { type }
   }
@@ -196,17 +227,32 @@ export function safeError(error: unknown): SafeError {
   return { type: typeof error === "string" ? "StringError" : "UnknownError" }
 }
 
-function extractErrorCode(source: object): string | undefined {
-  if (!Object.hasOwn(source, "code")) {
-    return undefined
+/**
+ * Pino serializer for `errorMode: "safe"` that preserves non-error primitives (`null`, `undefined`,
+ * `boolean`, `number`) untouched like `pino.stdSerializers.err`, while sanitizing errors and objects.
+ */
+export function serializeSafeError(value: unknown): unknown {
+  if (value === null || value === undefined || typeof value === "boolean" || typeof value === "number") {
+    return value
   }
+  return safeError(value)
+}
 
-  const raw = (source as { code?: unknown }).code
-  if (typeof raw === "string" && raw.length > 0) {
-    return raw
-  }
-  if (typeof raw === "number") {
-    return String(raw)
+function extractErrorCode(source: object): string | undefined {
+  try {
+    if (!("code" in source)) {
+      return undefined
+    }
+
+    const raw = (source as { code?: unknown }).code
+    if (typeof raw === "string" && raw.length > 0) {
+      return raw
+    }
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      return String(raw)
+    }
+  } catch {
+    // Never throw from a getter while logging an error.
   }
 
   return undefined
@@ -216,27 +262,26 @@ function extractErrorCode(source: object): string | undefined {
  * Normalize runtime log data so non-object inputs and Error values never corrupt Pino's JSON output.
  */
 export function normalizeLogData(data: unknown, errorMode: ErrorMode): LogData {
-  if (data instanceof Error) {
+  if (isErrorInstance(data)) {
     return { err: errorMode === "safe" ? safeError(data) : data }
   }
 
-  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+  if (!isPlainObject(data)) {
     return { value: data }
   }
 
-  const record = data as LogData
   if (errorMode !== "safe") {
-    return record
+    return data
   }
 
   // Only allocate a shallow clone when a top-level Error property needs safe sanitization.
   let sanitized: LogData | undefined
-  for (const [key, value] of Object.entries(record)) {
-    if (value instanceof Error) {
-      sanitized ??= { ...record }
+  for (const [key, value] of Object.entries(data)) {
+    if (isErrorInstance(value)) {
+      sanitized ??= { ...data }
       sanitized[key] = safeError(value)
     }
   }
 
-  return sanitized ?? record
+  return sanitized ?? data
 }

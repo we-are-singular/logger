@@ -65,7 +65,10 @@ export interface LoggerOptions {
   sync?: boolean
   /** Custom Pino destination stream for testing, files, or stderr routing. */
   destination?: DestinationStream
-  /** Override or extend default redaction paths; pass `false` to disable redaction. */
+  /**
+   * Replaces `DEFAULT_REDACT_PATHS` when an array or object is supplied; pass `false` to disable redaction.
+   * To extend defaults, spread `[...DEFAULT_REDACT_PATHS, "customField"]`.
+   */
   redact?: RedactOption
   /** Optional Pino mixin hook invoked on every log entry (e.g. AsyncLocalStorage correlation IDs). */
   mixin?: () => LogData
@@ -92,6 +95,6 @@ export interface LogContext<T extends LogData = LogData> {
   run: <R>(fields: T, fn: () => R) => R
   /** Read the current correlation fields, if inside a `run()` scope. */
   get: () => T | undefined
-  /** Pino `mixin` callback returning the active correlation fields or `{}`. */
+  /** Pino `mixin` callback returning a fresh copy of the active correlation fields or `{}`. */
   mixin: () => LogData
 }

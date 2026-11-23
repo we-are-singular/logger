@@ -1,20 +1,50 @@
 import type { ChildLoggerOptions, Logger as PinoLogger } from "pino"
-import { normalizeLogData } from "./config"
+import { isPlainObject, normalizeLogData, serializeSafeError } from "./config"
 import { createRootPino } from "./pino-factory"
 import type { ActiveLogLevel, ErrorMode, LogData, LogDataInput, LogLevel, LoggerOptions } from "./types"
 
-const INTERNAL_CONSTRUCT = Symbol("LoggerClass.internal")
+/**
+ * Cross-realm brand symbol surviving dual ESM/CJS module loading.
+ */
+const LOGGER_CLASS_BRAND = Symbol.for("@we-are-singular/logger/LoggerClass")
 
-interface InternalInit {
-  [INTERNAL_CONSTRUCT]: true
-  rootPino: PinoLogger
-  pino: PinoLogger
-  errorMode: ErrorMode
-  hasCustomChildOptions: boolean
+function hasNonLevelChildOptions(options: ChildLoggerOptions | undefined): boolean {
+  if (!options) {
+    return false
+  }
+  for (const [key, value] of Object.entries(options)) {
+    if (key !== "level" && value !== undefined) {
+      return true
+    }
+  }
+  return false
 }
 
-function isInternalInit(value: unknown): value is InternalInit {
-  return typeof value === "object" && value !== null && INTERNAL_CONSTRUCT in value
+function enforceSafeSerializers(
+  errorMode: ErrorMode,
+  childOptions: ChildLoggerOptions | undefined
+): ChildLoggerOptions | undefined {
+  if (errorMode !== "safe" || !childOptions?.serializers) {
+    return childOptions
+  }
+
+  // Prevent frameworks like Fastify v5 from overwriting safeError with pino.stdSerializers.err.
+  return {
+    ...childOptions,
+    serializers: {
+      ...childOptions.serializers,
+      err: serializeSafeError,
+      error: serializeSafeError,
+    },
+  }
+}
+
+/**
+ * Cross-realm type guard for {@link LoggerClass} instances (safe across mixed ESM/CJS imports).
+ * @internal
+ */
+export function isLoggerClass(value: unknown): value is LoggerClass {
+  return typeof value === "object" && value !== null && LOGGER_CLASS_BRAND in value
 }
 
 /**
@@ -25,42 +55,53 @@ function isInternalInit(value: unknown): value is InternalInit {
  */
 export class LoggerClass {
   readonly pino: PinoLogger
+  readonly errorMode: ErrorMode
   private readonly rootPino: PinoLogger
-  private readonly errorMode: ErrorMode
+  private readonly bindings: Readonly<LogData>
   private readonly hasCustomChildOptions: boolean
 
+  constructor(options?: LoggerOptions)
   constructor(
     app?: string,
     module?: string,
     context?: string,
     options?: Omit<LoggerOptions, "app" | "module" | "context">
   )
-  /** @internal */
-  constructor(internal: InternalInit)
   constructor(
-    appOrInternal?: string | InternalInit,
+    appOrOptions?: string | LoggerOptions,
     module?: string,
     context?: string,
     options?: Omit<LoggerOptions, "app" | "module" | "context">
   ) {
-    if (isInternalInit(appOrInternal)) {
-      this.rootPino = appOrInternal.rootPino
-      this.pino = appOrInternal.pino
-      this.errorMode = appOrInternal.errorMode
-      this.hasCustomChildOptions = appOrInternal.hasCustomChildOptions
-      return
-    }
+    const resolvedOptions: LoggerOptions = isPlainObject(appOrOptions)
+      ? appOrOptions
+      : {
+          ...options,
+          ...(appOrOptions !== undefined ? { app: appOrOptions } : {}),
+          ...(module !== undefined ? { module } : {}),
+          ...(context !== undefined ? { context } : {}),
+        }
 
-    const created = createRootPino({
-      ...options,
-      ...(appOrInternal !== undefined ? { app: appOrInternal } : {}),
-      ...(module !== undefined ? { module } : {}),
-      ...(context !== undefined ? { context } : {}),
-    })
+    const created = createRootPino(resolvedOptions)
     this.rootPino = created.rootPino
     this.pino = created.pino
+    this.bindings = created.bindings
     this.errorMode = created.errorMode
     this.hasCustomChildOptions = false
+    Object.defineProperty(this, LOGGER_CLASS_BRAND, { value: true })
+  }
+
+  private static createDerived(state: {
+    rootPino: PinoLogger
+    pino: PinoLogger
+    bindings: Readonly<LogData>
+    errorMode: ErrorMode
+    hasCustomChildOptions: boolean
+  }): LoggerClass {
+    const derived = Object.create(LoggerClass.prototype) as LoggerClass
+    Object.assign(derived, state)
+    Object.defineProperty(derived, LOGGER_CLASS_BRAND, { value: true })
+    return derived
   }
 
   /**
@@ -74,13 +115,7 @@ export class LoggerClass {
    * Create an independent child logger preserving all existing bindings.
    */
   fork(): LoggerClass {
-    return new LoggerClass({
-      [INTERNAL_CONSTRUCT]: true,
-      rootPino: this.rootPino,
-      pino: this.pino.child({}),
-      errorMode: this.errorMode,
-      hasCustomChildOptions: this.hasCustomChildOptions,
-    })
+    return this.child({})
   }
 
   /**
@@ -108,21 +143,27 @@ export class LoggerClass {
    * Return a new child logger with additional static bindings and optional Pino child options.
    */
   child(bindings: LogData, childOptions?: ChildLoggerOptions): LoggerClass {
-    const existing = this.pino.bindings() as LogData
-    const hasOverlap = Object.keys(bindings).some(key => Object.hasOwn(existing, key))
-    const hasCustomOptions = this.hasCustomChildOptions || childOptions !== undefined
+    const safeOptions = enforceSafeSerializers(this.errorMode, childOptions)
+    const bindingKeys = Object.keys(bindings)
+    const hasOverlap = bindingKeys.some(key => Object.hasOwn(this.bindings, key))
+    const hasCustomOptions = this.hasCustomChildOptions || hasNonLevelChildOptions(safeOptions)
+    const nextBindings: LogData = bindingKeys.length > 0 ? { ...this.bindings, ...bindings } : this.bindings
 
-    // Fast path: chain directly from this.pino to reuse pre-serialized chindings.
-    // Rebuild from rootPino when overriding an existing key so raw NDJSON never emits duplicate keys.
+    // Fast path chains directly from this.pino to reuse pre-serialized chindings.
+    // When overriding an existing key (and no ancestor set non-level custom childOptions),
+    // rebuild from rootPino so raw NDJSON avoids duplicate keys while preserving level.
     const nextPino =
       hasOverlap && !this.hasCustomChildOptions
-        ? this.rootPino.child({ ...existing, ...bindings }, { level: this.pino.level, ...childOptions })
-        : this.pino.child(bindings, childOptions)
+        ? this.rootPino.child(nextBindings, {
+            ...safeOptions,
+            level: safeOptions?.level ?? this.pino.level,
+          })
+        : this.pino.child(bindings, safeOptions)
 
-    return new LoggerClass({
-      [INTERNAL_CONSTRUCT]: true,
+    return LoggerClass.createDerived({
       rootPino: this.rootPino,
       pino: nextPino,
+      bindings: nextBindings,
       errorMode: this.errorMode,
       hasCustomChildOptions: hasCustomOptions,
     })
@@ -171,11 +212,6 @@ export class LoggerClass {
       return
     }
 
-    if (data === undefined) {
-      this.pino[level](message)
-      return
-    }
-
     const resolved: unknown = typeof data === "function" ? data() : data
     if (resolved === undefined) {
       this.pino[level](message)
@@ -190,6 +226,5 @@ export class LoggerClass {
  * Create a configured, side-effect-free {@link LoggerClass} instance.
  */
 export function createLogger(options: LoggerOptions = {}): LoggerClass {
-  const { app, module, context, ...rest } = options
-  return new LoggerClass(app, module, context, rest)
+  return new LoggerClass(options)
 }

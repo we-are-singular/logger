@@ -5,7 +5,7 @@ import pino, {
   type Logger as PinoLogger,
   type LoggerOptions as PinoLoggerOptions,
 } from "pino"
-import { resolveLoggerConfig, safeError } from "./config"
+import { resolveLoggerConfig, serializeSafeError } from "./config"
 import { createPrettyStream } from "./pretty"
 import type { ErrorMode, LogData, LoggerOptions } from "./types"
 
@@ -23,6 +23,7 @@ function buildInitialBindings(options: LoggerOptions): LogData | undefined {
 export interface CreatedPinoRoot {
   rootPino: PinoLogger
   pino: PinoLogger
+  bindings: LogData
   errorMode: ErrorMode
 }
 
@@ -41,7 +42,7 @@ export function createRootPino(options: LoggerOptions): CreatedPinoRoot {
     },
     serializers:
       config.errorMode === "safe"
-        ? { err: safeError, error: safeError }
+        ? { err: serializeSafeError, error: serializeSafeError }
         : { err: stdSerializers.err, error: stdSerializers.err },
     ...(config.redact ? { redact: config.redact } : {}),
     ...(options.mixin ? { mixin: options.mixin } : {}),
@@ -71,6 +72,7 @@ export function createRootPino(options: LoggerOptions): CreatedPinoRoot {
   return {
     rootPino,
     pino: instance,
+    bindings: initialBindings ?? {},
     errorMode: config.errorMode,
   }
 }
