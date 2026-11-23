@@ -1,67 +1,119 @@
 {
   "name": "@we-are-singular/logger",
   "version": "2.1.3",
-  "description": "A simple pinojs wrapper",
-  "type": "module",
-  "types": ".build/index.d.ts",
-  "files": [
-    ".build/**/*"
-  ],
-  "exports": {
-    ".": {
-      "import": "./.build/index.mjs",
-      "require": "./.build/index.cjs",
-      "types": "./.build/index.d.ts"
-    }
-  },
-  "scripts": {
-    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "build": "rollup -c",
-    "release": "release-it",
-    "lint": "tsc --noEmit && TIMING=1 eslint --color --ext .cjs,.mjs,.js,.ts,.md,.json,.yml,yaml ./"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/we-are-singular/logger.git"
-  },
-  "author": "singular",
-  "license": "MIT",
+  "description": "Fast, immutable Pino v10 logger wrapper for Node.js, NestJS, and Fastify",
   "homepage": "https://github.com/we-are-singular/logger#readme",
   "bugs": {
     "url": "https://github.com/we-are-singular/logger/issues"
   },
-  "devDependencies": {
-    "@nestjs/common": "^11.1.9",
-    "@rollup/plugin-typescript": "^12.3.0",
-    "@types/node": "^25.2.3",
-    "@we-are-singular/eslint-config": "^2.4.0",
-    "fastify": "^5.7.4",
-    "prettier": "^3.6.2",
-    "release-it": "^19.0.6",
-    "rollup": "^4.53.2"
+  "license": "MIT",
+  "author": "singular",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/we-are-singular/logger.git"
+  },
+  "files": [
+    ".build/**/*"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "types": "./.build/index.d.mts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./.build/index.d.mts",
+        "default": "./.build/index.mjs"
+      },
+      "require": {
+        "types": "./.build/index.d.cts",
+        "default": "./.build/index.cjs"
+      }
+    },
+    "./nestjs": {
+      "import": {
+        "types": "./.build/nestjs.d.mts",
+        "default": "./.build/nestjs.mjs"
+      },
+      "require": {
+        "types": "./.build/nestjs.d.cts",
+        "default": "./.build/nestjs.cjs"
+      }
+    },
+    "./fastify": {
+      "import": {
+        "types": "./.build/fastify.d.mts",
+        "default": "./.build/fastify.mjs"
+      },
+      "require": {
+        "types": "./.build/fastify.d.cts",
+        "default": "./.build/fastify.cjs"
+      }
+    }
+  },
+  "scripts": {
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "lint": "tsc --noEmit && oxlint .",
+    "lint:fix": "oxlint --fix .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "build": "tsdown",
+    "check:pkg": "publint --strict",
+    "prepare": "husky",
+    "release": "release-it"
   },
   "dependencies": {
-    "pino": "^10.1.0",
-    "pino-pretty": "^13.1.2"
+    "pino": "^10.4.0",
+    "pino-pretty": "^13.2.0"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
+    "@nestjs/common": "^12.6.0",
+    "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^5.1.1",
+    "fastify": "^5.12.8",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.2",
+    "oxfmt": "^0.79.0",
+    "oxlint": "^1.94.0",
+    "publint": "^0.3.25",
+    "release-it": "^21.1.3",
+    "tsdown": "^0.23.7",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1"
   },
   "peerDependencies": {
-    "pino": "^10.1.0",
-    "pino-pretty": "^13.1.2"
+    "@nestjs/common": "^10.0.0 || ^11.0.0 || ^12.0.0",
+    "fastify": "^5.0.0"
   },
-  "overrides": {
-    "glob": ">11.1.0"
+  "peerDependenciesMeta": {
+    "@nestjs/common": {
+      "optional": true
+    },
+    "fastify": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22"
   },
   "release-it": {
     "hooks": {
       "before:init": [
         "git pull -r",
-        "npm run build"
+        "npm run format:check",
+        "npm run lint",
+        "npm run build",
+        "npm run test",
+        "npm run check:pkg"
       ],
       "after:bump": "npx auto-changelog -p"
     },
     "git": {
       "requireBranch": "main",
-      "commitMessage": "Release: ${version}"
+      "commitMessage": "release: ${version}"
     },
     "github": {
       "release": true
