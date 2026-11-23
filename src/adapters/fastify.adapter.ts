@@ -85,7 +85,7 @@ export class FastifyLoggerAdapter implements FastifyBaseLogger {
   /**
    * Create a Fastify child logger reusing the underlying Pino stream with zero wasted root allocations.
    */
-  child(bindings: Bindings, options?: ChildLoggerOptions): FastifyBaseLogger {
+  child(bindings: Bindings, options?: ChildLoggerOptions): FastifyLoggerAdapter {
     return FastifyLoggerAdapter.fromChildLogger(this.logger.child(bindings as LogData, options))
   }
 

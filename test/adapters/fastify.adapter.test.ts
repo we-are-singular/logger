@@ -159,6 +159,11 @@ describe("Fastify logger adapter", () => {
     const app = fastify({
       loggerInstance: fastifyLogger,
     })
+    app.get("/hello", async req => {
+      const child = req.log.child({ feature: "greeting" })
+      child.info("child log", { count: 1 })
+      return { hello: "world" }
+    })
     app.get("/boom", async () => {
       throw Object.assign(new Error("ROUTE_SECRET_TOKEN_LEAK"), { code: "E_ROUTE" })
     })
@@ -166,12 +171,16 @@ describe("Fastify logger adapter", () => {
       throw { statusCode: 500, name: "DbErr", message: "PLAIN_OBJECT_SECRET_LEAK", code: "28P01" }
     })
 
-    const res = await app.inject({ method: "GET", url: "/boom" })
-    const plainRes = await app.inject({ method: "GET", url: "/plain-boom" })
+    // Use a real HTTP socket (not only app.inject) so Fastify Request/Reply circular sockets are exercised.
+    const address = await app.listen({ host: "127.0.0.1", port: 0 })
+    const helloRes = await fetch(`${address}/hello`)
+    const res = await fetch(`${address}/boom`)
+    const plainRes = await fetch(`${address}/plain-boom`)
     await app.close()
 
-    expect(res.statusCode).toBe(500)
-    expect(plainRes.statusCode).toBe(500)
+    expect(helloRes.status).toBe(200)
+    expect(res.status).toBe(500)
+    expect(plainRes.status).toBe(500)
 
     const serialized = JSON.stringify(records)
     expect(serialized).not.toContain("TOPSECRET")
@@ -199,9 +208,24 @@ describe("Fastify logger adapter", () => {
       message: "printf err: Error",
     })
 
+    const incomingHello = records.find(
+      r => r.message === "incoming request" && (r.req as { url?: string } | undefined)?.url === "/hello"
+    )
+    expect(incomingHello?.req).toMatchObject({ method: "GET", url: "/hello" })
+
+    const completedHello = records.find(
+      r => r.message === "request completed" && (r.res as { statusCode?: number } | undefined)?.statusCode === 200
+    )
+    expect(completedHello?.res).toMatchObject({ statusCode: 200 })
+
+    const childHelloLog = records.find(r => r.message === "child log")
+    expect(childHelloLog).toMatchObject({ feature: "greeting", count: 1 })
+
     const routeErrLog = records.find(r => (r.err as { code?: string } | undefined)?.code === "E_ROUTE")
     expect(routeErrLog?.err).toEqual({ type: "Error", code: "E_ROUTE" })
     expect(routeErrLog?.message).toBe("Error")
+    expect(routeErrLog?.req).toMatchObject({ method: "GET", url: "/boom" })
+    expect(routeErrLog?.res).toMatchObject({ statusCode: 500 })
 
     const plainErrLog = records.find(r => (r.err as { code?: string } | undefined)?.code === "28P01")
     expect(plainErrLog?.err).toEqual({ type: "DbErr", code: "28P01" })
