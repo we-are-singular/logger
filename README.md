@@ -52,7 +52,7 @@ Options passed to `createLogger(options)` always take precedence over environmen
 
 ## Security, Redaction & Safe Errors
 
-`createLogger` enables `fast-redact` by default using `DEFAULT_REDACT_PATHS` with censor `"[REDACTED]"`. Default paths redact top-level and 1-level nested credential fields (`password`, `passphrase`, `token`, `accessToken`, `refreshToken`, `idToken`, `secret`, `clientSecret`, `webhookSecret`, `apiKey`, `privateKey`, `authorization`, `cookie`, `set-cookie`, `creditCard`, `ssn`) plus HTTP headers (`headers.authorization`, `headers.cookie`, `headers["set-cookie"]`, `req.headers.authorization`, `req.headers.cookie`, `res.headers["set-cookie"]`).
+`createLogger` enables `fast-redact` by default using `DEFAULT_REDACT_PATHS` with censor `"[REDACTED]"`. Default paths redact top-level and 1-level nested camelCase and snake_case credential fields (`password`, `passphrase`, `token`, `accessToken`/`access_token`, `refreshToken`/`refresh_token`, `idToken`/`id_token`, `secret`, `clientSecret`/`client_secret`, `webhookSecret`/`webhook_secret`, `apiKey`/`api_key`, `privateKey`/`private_key`, `creditCard`/`credit_card`, `ssn`), lowercase and Title-Case HTTP headers (`authorization`/`Authorization`, `cookie`/`Cookie`, `set-cookie`/`Set-Cookie`, `x-api-key`/`X-Api-Key`, `proxy-authorization`/`Proxy-Authorization`, which covers `headers.*`), and nested `req.headers.*` / `res.headers.*` paths.
 
 ```ts
 import { DEFAULT_REDACT_PATHS, createLogger, safeError } from "@we-are-singular/logger"
@@ -135,6 +135,11 @@ export class LoggingModule {}
   exports: [NestJSLoggerAdapter],
 })
 export class ServicesModule {}
+
+@Module({
+  imports: [LoggingModule, ServicesModule],
+})
+export class AppModule {}
 
 @Injectable()
 export class UsersService {
