@@ -1,4 +1,4 @@
-import type { DestinationStream } from "pino"
+import pino, { type DestinationStream } from "pino"
 import { LoggerClass, createLogger, createMemoryLogger } from "../../src/index"
 
 describe("LoggerClass immutability and bindings", () => {
@@ -85,7 +85,7 @@ describe("LoggerClass immutability and bindings", () => {
     })
   })
 
-  it("avoids duplicate JSON keys in raw NDJSON when overriding existing bindings", () => {
+  it("avoids duplicate JSON keys even after empty or level-only childOptions and preserves level on { level: undefined }", () => {
     const rawLines: string[] = []
     const destination: DestinationStream = {
       write(chunk: string) {
@@ -98,13 +98,21 @@ describe("LoggerClass immutability and bindings", () => {
       module: "OldModule",
       context: "OldContext",
       bindings: { requestId: "req-1" },
+      level: "info",
       format: "json",
       sync: true,
       destination,
     })
 
-    const updated = root.withModule("NewModule").withContext("NewContext").withBindings({ requestId: "req-2" })
-    updated.info("overridden")
+    const emptyOptsChild = root.child({ traceId: "t-1" }, {})
+    const debugChild = emptyOptsChild.child({ spanId: "s-1" }, { level: "debug" })
+    const overridden = debugChild
+      .child({ module: "NewModule" }, { level: undefined })
+      .withContext("NewContext")
+      .withBindings({ requestId: "req-2" })
+
+    expect(overridden.level).toBe("debug")
+    overridden.debug("overridden")
 
     expect(rawLines).toHaveLength(1)
     const line = rawLines[0]!
@@ -114,30 +122,55 @@ describe("LoggerClass immutability and bindings", () => {
 
     const parsed = JSON.parse(line) as Record<string, unknown>
     expect(parsed).toMatchObject({
+      level: "debug",
       app: "MyApp",
       module: "NewModule",
       context: "NewContext",
       requestId: "req-2",
+      traceId: "t-1",
+      spanId: "s-1",
       message: "overridden",
     })
   })
 
-  it("supports direct LoggerClass construction with app, module, context, and options", () => {
+  it("preserves safe error serializers when childOptions supplies pino.stdSerializers.err", () => {
+    const { logger, records } = createMemoryLogger({ errorMode: "safe" })
+    const child = logger.child({ reqId: "r-1" }, { serializers: { err: pino.stdSerializers.err } })
+
+    child.error("failed", { err: Object.assign(new Error("postgres://secret@db/prod"), { code: "ECONNREFUSED" }) })
+
+    expect(records).toHaveLength(1)
+    expect(records[0]?.err).toEqual({ type: "Error", code: "ECONNREFUSED" })
+    expect(JSON.stringify(records[0])).not.toContain("postgres://secret@db/prod")
+  })
+
+  it("supports both positional and LoggerOptions constructor forms", () => {
     const lines: string[] = []
-    const logger = new LoggerClass("DirectApp", "Orders", "CreateOrder", {
+    const destination: DestinationStream = {
+      write(chunk: string) {
+        lines.push(chunk)
+      },
+    }
+
+    const positional = new LoggerClass("DirectApp", "Orders", "CreateOrder", {
       format: "json",
       sync: true,
       level: "debug",
-      destination: {
-        write(chunk: string) {
-          lines.push(chunk)
-        },
-      },
+      destination,
+    })
+    const fromOptions = new LoggerClass({
+      app: "OptionsApp",
+      module: "Billing",
+      format: "json",
+      sync: true,
+      level: "info",
+      destination,
     })
 
-    logger.debug("created", { orderId: "ord-123" })
+    positional.debug("created", { orderId: "ord-123" })
+    fromOptions.info("charged")
 
-    expect(lines).toHaveLength(1)
+    expect(lines).toHaveLength(2)
     expect(JSON.parse(lines[0]!)).toMatchObject({
       level: "debug",
       app: "DirectApp",
@@ -145,6 +178,12 @@ describe("LoggerClass immutability and bindings", () => {
       context: "CreateOrder",
       orderId: "ord-123",
       message: "created",
+    })
+    expect(JSON.parse(lines[1]!)).toMatchObject({
+      level: "info",
+      app: "OptionsApp",
+      module: "Billing",
+      message: "charged",
     })
   })
 

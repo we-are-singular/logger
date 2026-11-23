@@ -1,5 +1,12 @@
+import { Logger as NestLogger } from "@nestjs/common"
 import { NEST_ROOT_LOGGER, NestJSLoggerAdapter, createNestJSLogger } from "../../src/adapters/nestjs.adapter"
 import { createMemoryLogger } from "../../src/index"
+
+class CustomNestLogger extends NestJSLoggerAdapter {
+  customTag(): string {
+    return "custom-subclass"
+  }
+}
 
 describe("NestJS logger adapter", () => {
   it("fixes v2 error(msg, undefined, context) bug and includes stack only when defined", () => {
@@ -39,7 +46,103 @@ describe("NestJS logger adapter", () => {
     })
   })
 
-  it("maps NestJS forRoot() levels cleanly", () => {
+  it("handles real @nestjs/common Logger calls with context, payloads, errors, and static error(msg, context)", () => {
+    const { logger, records } = createMemoryLogger({ app: "NestReal", level: "trace" })
+    NestLogger.overrideLogger(createNestJSLogger(logger).forRoot())
+
+    try {
+      const svcLogger = new NestLogger("UsersService")
+      svcLogger.log("User created", { userId: "u-1" })
+      svcLogger.warn("Slow query", { ms: 420 })
+      svcLogger.debug("Cache hit", { key: "users:1" })
+      svcLogger.verbose("Verbose step")
+      svcLogger.error("Query failed", new Error("db timeout"))
+      svcLogger.fatal("Crash", "Error: fatal\n    at App.run (app.ts:10:5)")
+      NestLogger.error("Static bootstrap failure", "Bootstrap")
+    } finally {
+      NestLogger.overrideLogger(false)
+    }
+
+    expect(records).toHaveLength(7)
+    expect(records[0]).toMatchObject({
+      level: "info",
+      message: "User created",
+      context: "UsersService",
+      extra: { userId: "u-1" },
+    })
+    expect(records[1]).toMatchObject({
+      level: "warn",
+      message: "Slow query",
+      context: "UsersService",
+      extra: { ms: 420 },
+    })
+    expect(records[2]).toMatchObject({
+      level: "debug",
+      message: "Cache hit",
+      context: "UsersService",
+      extra: { key: "users:1" },
+    })
+    expect(records[3]).toMatchObject({
+      level: "trace",
+      message: "Verbose step",
+      context: "UsersService",
+    })
+    expect(records[4]).toMatchObject({
+      level: "error",
+      message: "Query failed",
+      context: "UsersService",
+      err: expect.objectContaining({ message: "db timeout" }),
+    })
+    expect(records[5]).toMatchObject({
+      level: "fatal",
+      message: "Crash",
+      context: "UsersService",
+      stack: "Error: fatal\n    at App.run (app.ts:10:5)",
+    })
+    expect(records[6]).toMatchObject({
+      level: "error",
+      message: "Static bootstrap failure",
+      context: "Bootstrap",
+    })
+    expect(records[6]).not.toHaveProperty("stack")
+  })
+
+  it("enforces errorMode: safe in forRoot().error() and fatal() without leaking message or stack", () => {
+    const { logger, records } = createMemoryLogger({ errorMode: "safe", level: "trace" })
+    const nestRoot = createNestJSLogger(logger).forRoot()
+    const secretErr = Object.assign(new Error("postgres://admin:SECRET@db/prod"), { code: "E_DB" })
+
+    nestRoot.error(secretErr, secretErr.stack, "DbModule")
+    nestRoot.error("crash", "Error: SECRET_STACK\n    at secret.ts:12:3", "Worker")
+    nestRoot.fatal?.(secretErr, "Error: FATAL_SECRET\n    at main.ts:1:1", "Bootstrap")
+
+    expect(records).toHaveLength(3)
+    const serialized = JSON.stringify(records)
+    expect(serialized).not.toContain("postgres://admin:SECRET@db/prod")
+    expect(serialized).not.toContain("SECRET_STACK")
+    expect(serialized).not.toContain("FATAL_SECRET")
+    expect(serialized).not.toContain('"stack"')
+
+    expect(records[0]).toMatchObject({
+      level: "error",
+      message: "Error",
+      context: "DbModule",
+      err: { type: "Error", code: "E_DB" },
+    })
+    expect(records[1]).toMatchObject({
+      level: "error",
+      message: "crash",
+      context: "Worker",
+    })
+    expect(records[2]).toMatchObject({
+      level: "fatal",
+      message: "Error",
+      context: "Bootstrap",
+      err: { type: "Error", code: "E_DB" },
+    })
+  })
+
+  it("maps direct NestJS forRoot() calls cleanly", () => {
     const { logger, records } = createMemoryLogger({ level: "trace" })
     const nestRoot = new NestJSLoggerAdapter(logger).forRoot()
 
@@ -79,7 +182,7 @@ describe("NestJS logger adapter", () => {
     expect(records[9]).not.toHaveProperty("context")
   })
 
-  it("derives immutable children and shares the root Pino stream in forFeature()", () => {
+  it("derives immutable children, preserves subclasses, and shares the root Pino stream in forFeature()", () => {
     const { logger, records } = createMemoryLogger({ app: "NestApp", level: "trace" })
     const parent = createNestJSLogger(logger)
 
@@ -115,20 +218,31 @@ describe("NestJS logger adapter", () => {
       level: "fatal",
     })
 
-    // Verify DI provider helpers share the single root Pino stream.
+    // Verify DI provider helpers share the single root Pino stream and preserve subclasses.
     const rootProvider = NestJSLoggerAdapter.forRootProvider(logger)
     expect(rootProvider.provide).toBe(NEST_ROOT_LOGGER)
     expect(rootProvider.useValue).toBe(logger)
 
     const featureFromInjected = NestJSLoggerAdapter.forFeature("Orders")
-    const injectedInstance = featureFromInjected.useFactory(rootProvider.useValue)
+    const injectedInstance = featureFromInjected.useFactory(rootProvider.useValue) as NestJSLoggerAdapter
     injectedInstance.info("from injected root")
 
-    const featureFromParent = NestJSLoggerAdapter.forFeature("Shipping", NestJSLoggerAdapter, parent)
-    const explicitInstance = featureFromParent.useFactory()
-    explicitInstance.error("from explicit parent")
+    const customFeature = NestJSLoggerAdapter.forFeature("Shipping", CustomNestLogger, parent)
+    const customInstance = customFeature.useFactory() as CustomNestLogger
+    const customChild = customInstance.withContext("ShippingService").withBindings({ carrier: "dhl" }).fork()
+
+    expect(customInstance).toBeInstanceOf(CustomNestLogger)
+    expect(customChild).toBeInstanceOf(CustomNestLogger)
+    expect(customChild.customTag()).toBe("custom-subclass")
+    customChild.error("from subclass")
 
     expect(records[5]).toMatchObject({ app: "NestApp", module: "Orders", message: "from injected root" })
-    expect(records[6]).toMatchObject({ app: "NestApp", module: "Shipping", message: "from explicit parent" })
+    expect(records[6]).toMatchObject({
+      app: "NestApp",
+      module: "Shipping",
+      context: "ShippingService",
+      carrier: "dhl",
+      message: "from subclass",
+    })
   })
 })
