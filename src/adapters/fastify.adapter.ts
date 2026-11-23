@@ -1,13 +1,10 @@
 import type { FastifyBaseLogger } from "fastify"
 import type { Bindings, ChildLoggerOptions } from "pino"
-import { LoggerClass, createLogger } from "../core/logger.class"
+import { isErrorInstance, isPlainObject, normalizeLogData, safeError } from "../core/config"
+import { LoggerClass, createLogger, isLoggerClass } from "../core/logger.class"
 import type { ActiveLogLevel, LogData, LoggerOptions } from "../core/types"
 
 const PRINTF_SPECIFIER = /%[sdjifoO%]/
-
-function isPlainObject(value: unknown): value is LogData {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
 
 /**
  * Fastify v5-compatible `FastifyBaseLogger` adapter backed by an immutable {@link LoggerClass}.
@@ -17,7 +14,7 @@ function isPlainObject(value: unknown): value is LogData {
 export class FastifyLoggerAdapter implements FastifyBaseLogger {
   readonly logger: LoggerClass
 
-  constructor(logger: LoggerClass)
+  constructor(loggerOrOptions?: LoggerClass | LoggerOptions)
   constructor(
     app?: string,
     module?: string,
@@ -25,17 +22,34 @@ export class FastifyLoggerAdapter implements FastifyBaseLogger {
     options?: Omit<LoggerOptions, "app" | "module" | "context">
   )
   constructor(
-    loggerOrApp?: LoggerClass | string,
+    loggerOrAppOrOptions?: LoggerClass | LoggerOptions | string,
     module?: string,
     context?: string,
     options?: Omit<LoggerOptions, "app" | "module" | "context">
   ) {
-    this.logger =
-      loggerOrApp instanceof LoggerClass ? loggerOrApp : new LoggerClass(loggerOrApp, module, context, options)
+    if (isLoggerClass(loggerOrAppOrOptions)) {
+      // Fork injected loggers so Fastify level mutations stay isolated from shared parent loggers.
+      this.logger = loggerOrAppOrOptions.fork()
+      return
+    }
+
+    if (typeof loggerOrAppOrOptions === "object" && loggerOrAppOrOptions !== null) {
+      this.logger = createLogger(loggerOrAppOrOptions)
+      return
+    }
+
+    this.logger = new LoggerClass(loggerOrAppOrOptions, module, context, options)
+  }
+
+  private static fromChildLogger(logger: LoggerClass): FastifyLoggerAdapter {
+    const adapter = Object.create(FastifyLoggerAdapter.prototype) as FastifyLoggerAdapter
+    Object.assign(adapter, { logger })
+    return adapter
   }
 
   /**
-   * Current Pino log level. Reads and mutates the underlying child Pino level cleanly.
+   * Current Pino log level. Reads and mutates this adapter's child Pino level without affecting
+   * any shared parent logger passed to the constructor.
    */
   get level(): string {
     return this.logger.pino.level
@@ -49,7 +63,7 @@ export class FastifyLoggerAdapter implements FastifyBaseLogger {
    * Create a Fastify child logger reusing the underlying Pino stream with zero wasted root allocations.
    */
   child(bindings: Bindings, options?: ChildLoggerOptions): FastifyBaseLogger {
-    return new FastifyLoggerAdapter(this.logger.child(bindings as LogData, options))
+    return FastifyLoggerAdapter.fromChildLogger(this.logger.child(bindings as LogData, options))
   }
 
   /**
@@ -105,6 +119,7 @@ export class FastifyLoggerAdapter implements FastifyBaseLogger {
     }
 
     const logFn = this.logger.pino[level] as (...params: unknown[]) => void
+    const { errorMode } = this.logger
 
     if (typeof msgOrObj === "string") {
       // Support both Fastify's `(msg, ...printfArgs)` and ergonomic `(msg, dataObj)` calls.
@@ -112,41 +127,41 @@ export class FastifyLoggerAdapter implements FastifyBaseLogger {
         this.logger[level](msgOrObj, args[0])
         return
       }
-      if (args.length === 0) {
-        logFn.call(this.logger.pino, msgOrObj)
-        return
-      }
       logFn.call(this.logger.pino, msgOrObj, ...args)
       return
     }
 
-    if (msgOrObj instanceof Error) {
-      const message = typeof args[0] === "string" ? args[0] : msgOrObj.message
-      const interpolation = typeof args[0] === "string" ? args.slice(1) : args
-      if (interpolation.length > 0) {
-        logFn.call(this.logger.pino, { err: msgOrObj }, message, ...interpolation)
-      } else {
-        this.logger[level](message, { err: msgOrObj })
-      }
+    if (isErrorInstance(msgOrObj)) {
+      const hasMessageArg = typeof args[0] === "string"
+      const fallbackMessage = errorMode === "safe" ? safeError(msgOrObj).type : msgOrObj.message
+      const message = hasMessageArg ? (args[0] as string) : fallbackMessage
+      const interpolation = hasMessageArg ? args.slice(1) : args
+      const errPayload = errorMode === "safe" ? safeError(msgOrObj) : msgOrObj
+      logFn.call(this.logger.pino, { err: errPayload }, message, ...interpolation)
       return
     }
 
+    const normalized = normalizeLogData(msgOrObj, errorMode)
     if (typeof args[0] === "string") {
-      const [msg, ...interpolation] = args
-      if (interpolation.length > 0) {
-        logFn.call(this.logger.pino, msgOrObj, msg, ...interpolation)
-      } else {
-        logFn.call(this.logger.pino, msgOrObj, msg)
+      let message = args[0]
+      // Fastify's default error handler logs `({ req, res, err }, err.message)`.
+      // In safe mode, replace a message matching the attached Error's raw message with its safe type.
+      if (errorMode === "safe" && isPlainObject(msgOrObj)) {
+        let attachedErr: Error | undefined
+        if (isErrorInstance(msgOrObj.err)) {
+          attachedErr = msgOrObj.err
+        } else if (isErrorInstance(msgOrObj.error)) {
+          attachedErr = msgOrObj.error
+        }
+        if (attachedErr && message === attachedErr.message) {
+          message = safeError(attachedErr).type
+        }
       }
+      logFn.call(this.logger.pino, normalized, message, ...args.slice(1))
       return
     }
 
-    if (isPlainObject(msgOrObj)) {
-      logFn.call(this.logger.pino, msgOrObj)
-      return
-    }
-
-    logFn.call(this.logger.pino, { value: msgOrObj })
+    logFn.call(this.logger.pino, normalized)
   }
 }
 
@@ -155,8 +170,5 @@ export class FastifyLoggerAdapter implements FastifyBaseLogger {
  * or {@link LoggerOptions}. Pass the returned instance to `fastify({ loggerInstance })`.
  */
 export function createFastifyLogger(loggerOrOptions?: LoggerClass | LoggerOptions): FastifyLoggerAdapter {
-  if (loggerOrOptions instanceof LoggerClass) {
-    return new FastifyLoggerAdapter(loggerOrOptions)
-  }
-  return new FastifyLoggerAdapter(createLogger(loggerOrOptions))
+  return new FastifyLoggerAdapter(loggerOrOptions)
 }
