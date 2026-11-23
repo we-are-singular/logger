@@ -47,6 +47,8 @@ describe("security and redaction", () => {
         "Set-Cookie": "sid=title-set-cookie",
         "x-api-key": "header-api-key",
         "X-Api-Key": "title-api-key",
+        "proxy-authorization": "Basic lower-proxy",
+        "Proxy-Authorization": "Basic title-proxy",
         "x-request-id": "keep-me",
       },
       req: {
@@ -56,6 +58,7 @@ describe("security and redaction", () => {
           cookie: "sid=req-cookie",
           Cookie: "sid=req-title-cookie",
           "x-api-key": "req-api-key",
+          "Proxy-Authorization": "Basic req-proxy",
           host: "api.example.com",
         },
       },
@@ -116,6 +119,8 @@ describe("security and redaction", () => {
       "Set-Cookie": "[REDACTED]",
       "x-api-key": "[REDACTED]",
       "X-Api-Key": "[REDACTED]",
+      "proxy-authorization": "[REDACTED]",
+      "Proxy-Authorization": "[REDACTED]",
       "x-request-id": "keep-me",
     })
 
@@ -126,6 +131,7 @@ describe("security and redaction", () => {
         cookie: "[REDACTED]",
         Cookie: "[REDACTED]",
         "x-api-key": "[REDACTED]",
+        "Proxy-Authorization": "[REDACTED]",
         host: "api.example.com",
       },
     })

@@ -53,6 +53,7 @@ describe("Fastify logger adapter", () => {
     fastifyLogger.warn({ retries: 3 }, "retrying %s", "webhook")
     fastifyLogger.error(new Error("boom"), "handler failed")
     fastifyLogger.error(new Error("interpolated %s"), "err %s", "detail")
+    fastifyLogger.error(new Error("SQL LIKE '%sales%' failed"), undefined)
     fastifyLogger.fatal({ code: "E_FATAL" })
     fastifyLogger.info(42)
     fastifyLogger.info([1, 2], "array with msg")
@@ -60,7 +61,7 @@ describe("Fastify logger adapter", () => {
     fastifyLogger.silent()
     fastifyLogger.flush()
 
-    expect(records).toHaveLength(11)
+    expect(records).toHaveLength(12)
     expect(records[0]).toMatchObject({ level: "trace", step: 1, message: "trace obj-first" })
     expect(records[1]).toMatchObject({ level: "debug", step: 2, message: "debug msg-first" })
     expect(records[2]).toMatchObject({ level: "info", message: "plain string" })
@@ -76,11 +77,15 @@ describe("Fastify logger adapter", () => {
       message: "err detail",
       err: expect.objectContaining({ message: "interpolated %s" }),
     })
-    expect(records[7]).toMatchObject({ level: "fatal", code: "E_FATAL" })
-    expect(records[8]).toMatchObject({ level: "info", value: 42 })
-    expect(records[9]).toMatchObject({ level: "info", value: [1, 2], message: "array with msg" })
-    expect(records[9]).not.toHaveProperty("0")
-    expect(records[10]).toMatchObject({ level: "info", value: 99, message: "primitive with msg" })
+    expect(records[7]).toMatchObject({
+      level: "error",
+      message: "SQL LIKE '%sales%' failed",
+    })
+    expect(records[8]).toMatchObject({ level: "fatal", code: "E_FATAL" })
+    expect(records[9]).toMatchObject({ level: "info", value: 42 })
+    expect(records[10]).toMatchObject({ level: "info", value: [1, 2], message: "array with msg" })
+    expect(records[10]).not.toHaveProperty("0")
+    expect(records[11]).toMatchObject({ level: "info", value: 99, message: "primitive with msg" })
 
     // Verify LoggerOptions constructor overload works identically to createFastifyLogger(options).
     const lines: string[] = []
@@ -145,8 +150,11 @@ describe("Fastify logger adapter", () => {
     })
 
     fastifyLogger.error(secretErr)
+    fastifyLogger.error(secretErr, secretErr.message)
     fastifyLogger.error({ err: secretErr })
     fastifyLogger.error({ cause: secretErr }, "wrapped cause")
+    fastifyLogger.error("printf err: %s", secretErr)
+    fastifyLogger.error({ reqId: "r-fmt" }, "printf nested: %o", { nested: secretErr })
 
     const app = fastify({
       loggerInstance: fastifyLogger,
@@ -154,16 +162,22 @@ describe("Fastify logger adapter", () => {
     app.get("/boom", async () => {
       throw Object.assign(new Error("ROUTE_SECRET_TOKEN_LEAK"), { code: "E_ROUTE" })
     })
+    app.get("/plain-boom", async () => {
+      throw { statusCode: 500, name: "DbErr", message: "PLAIN_OBJECT_SECRET_LEAK", code: "28P01" }
+    })
 
     const res = await app.inject({ method: "GET", url: "/boom" })
+    const plainRes = await app.inject({ method: "GET", url: "/plain-boom" })
     await app.close()
 
     expect(res.statusCode).toBe(500)
+    expect(plainRes.statusCode).toBe(500)
 
     const serialized = JSON.stringify(records)
     expect(serialized).not.toContain("TOPSECRET")
     expect(serialized).not.toContain("SELECT * FROM secrets")
     expect(serialized).not.toContain("ROUTE_SECRET_TOKEN_LEAK")
+    expect(serialized).not.toContain("PLAIN_OBJECT_SECRET_LEAK")
     expect(serialized).not.toContain('"stack"')
 
     expect(records[0]).toMatchObject({
@@ -171,14 +185,26 @@ describe("Fastify logger adapter", () => {
       err: { type: "Error", code: "ECONNREFUSED" },
     })
     expect(records[1]).toMatchObject({
+      message: "Error",
       err: { type: "Error", code: "ECONNREFUSED" },
     })
     expect(records[2]).toMatchObject({
+      err: { type: "Error", code: "ECONNREFUSED" },
+    })
+    expect(records[3]).toMatchObject({
       message: "wrapped cause",
       cause: { type: "Error", code: "ECONNREFUSED" },
+    })
+    expect(records[4]).toMatchObject({
+      message: "printf err: Error",
     })
 
     const routeErrLog = records.find(r => (r.err as { code?: string } | undefined)?.code === "E_ROUTE")
     expect(routeErrLog?.err).toEqual({ type: "Error", code: "E_ROUTE" })
+    expect(routeErrLog?.message).toBe("Error")
+
+    const plainErrLog = records.find(r => (r.err as { code?: string } | undefined)?.code === "28P01")
+    expect(plainErrLog?.err).toEqual({ type: "DbErr", code: "28P01" })
+    expect(plainErrLog?.message).toBe("DbErr")
   })
 })

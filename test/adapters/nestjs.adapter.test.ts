@@ -1,6 +1,7 @@
 import { Logger as NestLogger } from "@nestjs/common"
+import type { DestinationStream } from "pino"
 import { NEST_ROOT_LOGGER, NestJSLoggerAdapter, createNestJSLogger } from "../../src/adapters/nestjs.adapter"
-import { createMemoryLogger } from "../../src/index"
+import { createLogger, createMemoryLogger } from "../../src/index"
 
 class CustomNestLogger extends NestJSLoggerAdapter {
   customTag(): string {
@@ -53,7 +54,10 @@ describe("NestJS logger adapter", () => {
     try {
       const svcLogger = new NestLogger("UsersService")
       svcLogger.log("User created", { userId: "u-1" })
+      svcLogger.log({ message: "From object", userId: "u-2" })
+      svcLogger.log({ event: "no-msg-key" })
       svcLogger.warn("Slow query", { ms: 420 })
+      svcLogger.warn(Object.assign(new Error("warn boom"), { code: "E_WARN" }))
       svcLogger.debug("Cache hit", { key: "users:1" })
       svcLogger.verbose("Verbose step")
       svcLogger.error("Query failed", new Error("db timeout"))
@@ -63,7 +67,7 @@ describe("NestJS logger adapter", () => {
       NestLogger.overrideLogger(false)
     }
 
-    expect(records).toHaveLength(7)
+    expect(records).toHaveLength(10)
     expect(records[0]).toMatchObject({
       level: "info",
       message: "User created",
@@ -71,40 +75,70 @@ describe("NestJS logger adapter", () => {
       extra: { userId: "u-1" },
     })
     expect(records[1]).toMatchObject({
+      level: "info",
+      message: "From object",
+      userId: "u-2",
+      context: "UsersService",
+    })
+    expect(records[2]).toMatchObject({
+      level: "info",
+      event: "no-msg-key",
+      context: "UsersService",
+    })
+    expect(records[2]).not.toHaveProperty("message")
+    expect(records[3]).toMatchObject({
       level: "warn",
       message: "Slow query",
       context: "UsersService",
       extra: { ms: 420 },
     })
-    expect(records[2]).toMatchObject({
+    expect(records[4]).toMatchObject({
+      level: "warn",
+      message: "warn boom",
+      context: "UsersService",
+      err: expect.objectContaining({ message: "warn boom", code: "E_WARN" }),
+    })
+    expect(records[5]).toMatchObject({
       level: "debug",
       message: "Cache hit",
       context: "UsersService",
       extra: { key: "users:1" },
     })
-    expect(records[3]).toMatchObject({
+    expect(records[6]).toMatchObject({
       level: "trace",
       message: "Verbose step",
       context: "UsersService",
     })
-    expect(records[4]).toMatchObject({
+    expect(records[7]).toMatchObject({
       level: "error",
       message: "Query failed",
       context: "UsersService",
       err: expect.objectContaining({ message: "db timeout" }),
     })
-    expect(records[5]).toMatchObject({
+    expect(records[8]).toMatchObject({
       level: "fatal",
       message: "Crash",
       context: "UsersService",
       stack: "Error: fatal\n    at App.run (app.ts:10:5)",
     })
-    expect(records[6]).toMatchObject({
+    expect(records[9]).toMatchObject({
       level: "error",
       message: "Static bootstrap failure",
       context: "Bootstrap",
     })
-    expect(records[6]).not.toHaveProperty("stack")
+    expect(records[9]).not.toHaveProperty("stack")
+
+    // Verify raw NDJSON has no duplicate "message" key when logging an object with { message }.
+    const rawLines: string[] = []
+    const dest: DestinationStream = {
+      write(chunk: string) {
+        rawLines.push(chunk)
+      },
+    }
+    const rawNest = createNestJSLogger(createLogger({ format: "json", sync: true, destination: dest })).forRoot()
+    rawNest.log({ message: "single-key", ok: true }, "RawCtx")
+    expect(rawLines[0]!.match(/"message":/g)).toHaveLength(1)
+    expect(JSON.parse(rawLines[0]!)).toMatchObject({ message: "single-key", ok: true, context: "RawCtx" })
   })
 
   it("enforces errorMode: safe in forRoot().error() and fatal() without leaking message or stack", () => {
@@ -114,9 +148,10 @@ describe("NestJS logger adapter", () => {
 
     nestRoot.error(secretErr, secretErr.stack, "DbModule")
     nestRoot.error("crash", "Error: SECRET_STACK\n    at secret.ts:12:3", "Worker")
+    nestRoot.error("nested extra err", { err: secretErr }, "UsersService")
     nestRoot.fatal?.(secretErr, "Error: FATAL_SECRET\n    at main.ts:1:1", "Bootstrap")
 
-    expect(records).toHaveLength(3)
+    expect(records).toHaveLength(4)
     const serialized = JSON.stringify(records)
     expect(serialized).not.toContain("postgres://admin:SECRET@db/prod")
     expect(serialized).not.toContain("SECRET_STACK")
@@ -135,6 +170,12 @@ describe("NestJS logger adapter", () => {
       context: "Worker",
     })
     expect(records[2]).toMatchObject({
+      level: "error",
+      message: "nested extra err",
+      context: "UsersService",
+      extra: { err: { type: "Error", code: "E_DB" } },
+    })
+    expect(records[3]).toMatchObject({
       level: "fatal",
       message: "Error",
       context: "Bootstrap",
@@ -227,6 +268,10 @@ describe("NestJS logger adapter", () => {
     const injectedInstance = featureFromInjected.useFactory(rootProvider.useValue) as NestJSLoggerAdapter
     injectedInstance.info("from injected root")
 
+    const featureWithUndefinedClass = NestJSLoggerAdapter.forFeature("Inventory", undefined, logger)
+    const inventoryInstance = featureWithUndefinedClass.useFactory() as NestJSLoggerAdapter
+    inventoryInstance.info("from explicit root logger")
+
     const customFeature = NestJSLoggerAdapter.forFeature("Shipping", CustomNestLogger, parent)
     const customInstance = customFeature.useFactory() as CustomNestLogger
     const customChild = customInstance.withContext("ShippingService").withBindings({ carrier: "dhl" }).fork()
@@ -237,7 +282,8 @@ describe("NestJS logger adapter", () => {
     customChild.error("from subclass")
 
     expect(records[5]).toMatchObject({ app: "NestApp", module: "Orders", message: "from injected root" })
-    expect(records[6]).toMatchObject({
+    expect(records[6]).toMatchObject({ app: "NestApp", module: "Inventory", message: "from explicit root logger" })
+    expect(records[7]).toMatchObject({
       app: "NestApp",
       module: "Shipping",
       context: "ShippingService",
