@@ -1,10 +1,33 @@
 import type { FastifyBaseLogger } from "fastify"
 import type { Bindings, ChildLoggerOptions } from "pino"
-import { isErrorInstance, isPlainObject, normalizeLogData, safeError } from "../core/config"
+import { isErrorInstance, isPlainObject, normalizeLogData, safeError, sanitizeSafeValue } from "../core/config"
 import { LoggerClass, createLogger, isLoggerClass } from "../core/logger.class"
-import type { ActiveLogLevel, LogData, LoggerOptions } from "../core/types"
+import type { ActiveLogLevel, ErrorMode, LogData, LoggerOptions } from "../core/types"
 
 const PRINTF_SPECIFIER = /%[sdjifoO%]/
+
+function sanitizePrintfArgs(args: unknown[], errorMode: ErrorMode): unknown[] {
+  if (errorMode !== "safe" || args.length === 0) {
+    return args
+  }
+
+  return args.map(arg => {
+    if (isErrorInstance(arg)) {
+      return safeError(arg).type
+    }
+    return sanitizeSafeValue(arg)
+  })
+}
+
+function scrubSafeErrorMessage(message: string, candidate: unknown): string {
+  if (isErrorInstance(candidate)) {
+    return message === candidate.message ? safeError(candidate).type : message
+  }
+  if (isPlainObject(candidate) && typeof candidate.message === "string" && message === candidate.message) {
+    return safeError(candidate).type
+  }
+  return message
+}
 
 /**
  * Fastify v5-compatible `FastifyBaseLogger` adapter backed by an immutable {@link LoggerClass}.
@@ -127,37 +150,38 @@ export class FastifyLoggerAdapter implements FastifyBaseLogger {
         this.logger[level](msgOrObj, args[0])
         return
       }
-      logFn.call(this.logger.pino, msgOrObj, ...args)
+      logFn.call(this.logger.pino, msgOrObj, ...sanitizePrintfArgs(args, errorMode))
       return
     }
 
     if (isErrorInstance(msgOrObj)) {
       const hasMessageArg = typeof args[0] === "string"
       const fallbackMessage = errorMode === "safe" ? safeError(msgOrObj).type : msgOrObj.message
-      const message = hasMessageArg ? (args[0] as string) : fallbackMessage
-      const interpolation = hasMessageArg ? args.slice(1) : args
+      let message = hasMessageArg ? (args[0] as string) : fallbackMessage
+      if (errorMode === "safe" && hasMessageArg) {
+        message = scrubSafeErrorMessage(message, msgOrObj)
+      }
       const errPayload = errorMode === "safe" ? safeError(msgOrObj) : msgOrObj
-      logFn.call(this.logger.pino, { err: errPayload }, message, ...interpolation)
+      // Never interpolate err.message as a printf format string when no explicit message arg was supplied.
+      if (hasMessageArg) {
+        logFn.call(this.logger.pino, { err: errPayload }, message, ...sanitizePrintfArgs(args.slice(1), errorMode))
+      } else {
+        logFn.call(this.logger.pino, { err: errPayload }, message)
+      }
       return
     }
 
     const normalized = normalizeLogData(msgOrObj, errorMode)
     if (typeof args[0] === "string") {
       let message = args[0]
-      // Fastify's default error handler logs `({ req, res, err }, err.message)`.
-      // In safe mode, replace a message matching the attached Error's raw message with its safe type.
+      // Fastify's default error handler logs `({ req, res, err }, err.message)` for Errors and error-like objects.
       if (errorMode === "safe" && isPlainObject(msgOrObj)) {
-        let attachedErr: Error | undefined
-        if (isErrorInstance(msgOrObj.err)) {
-          attachedErr = msgOrObj.err
-        } else if (isErrorInstance(msgOrObj.error)) {
-          attachedErr = msgOrObj.error
-        }
-        if (attachedErr && message === attachedErr.message) {
-          message = safeError(attachedErr).type
+        const candidate = msgOrObj.err ?? msgOrObj.error
+        if (candidate !== undefined) {
+          message = scrubSafeErrorMessage(message, candidate)
         }
       }
-      logFn.call(this.logger.pino, normalized, message, ...args.slice(1))
+      logFn.call(this.logger.pino, normalized, message, ...sanitizePrintfArgs(args.slice(1), errorMode))
       return
     }
 
